@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package cluster;
+option go_package = "/cluster;cluster";
+
+message Ping {
+  string from = 1;
+}
+message Ack {
+  string from = 1;
+}
+
+service ClusterService{
+    rpc PingNode(Ping) returns (Ack);
+}
