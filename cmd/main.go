@@ -12,9 +12,8 @@ import (
 )
 
 func main() {
-	port := flag.String("port", "5001", "port of node")
+	port := flag.String("port", "", "port of node")
 	peers := flag.String("peers", "", "list of addresses for peers seperated by commas")
-
 	flag.Parse()
 
 	if port == nil {

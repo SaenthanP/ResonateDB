@@ -8,13 +8,22 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+type ServerState int
+
+const (
+	Alive ServerState = iota
+	Suspect
+	Fail
+)
+
 type Node struct {
-	address string
-	peers   map[string]*Peer
+	Address string
+	Peers   map[string]*Peer
 }
 
 type Peer struct {
 	Client pb.ClusterServiceClient
+	State  ServerState
 }
 
 func NewNode(nodeAddress string, seedAddresses []string) *Node {
@@ -23,14 +32,14 @@ func NewNode(nodeAddress string, seedAddresses []string) *Node {
 		// TODO checkback to do TLS
 		conn, err := grpc.NewClient(peerAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			log.Fatalf("did not connect: %v", err)
+			log.Fatalf("did not connect to server: %s %v", peerAddress, err)
 		}
 
 		client := pb.NewClusterServiceClient(conn)
 		peers[peerAddress] = &Peer{Client: client}
 
 	}
-	return &Node{address: nodeAddress, peers: peers}
+	return &Node{Address: nodeAddress, Peers: peers}
 }
 
 /*

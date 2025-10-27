@@ -1,0 +1,26 @@
+version: '3'
+
+vars:
+  PROTO_DIR: "protos/cluster"
+  OUT_DIR: "proto-gen"
+  PROTO_FILES: "{{.PROTO_DIR}}/cluster.proto"
+
+tasks:
+  generate:
+    desc: "Generate protobuf code"
+    cmds:
+      - mkdir -p {{.OUT_DIR}}/cluster
+      - protoc 
+          --go_out={{.OUT_DIR}} 
+          --go-grpc_out={{.OUT_DIR}} 
+          {{.PROTO_FILES}}
+
+  clean:
+    desc: "Clean generated code"
+    cmds:
+      - rm -rf {{.OUT_DIR}}/cluster/*.pb.go
+
+  all:
+    desc: "Run all tasks (generate)"
+    deps:
+      - generate
