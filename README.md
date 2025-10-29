@@ -1,3 +1,4 @@
+> ⚠️ Work In Progress
 # ResonateDB
 A leaderless distributed SQLite database inspired by the Dynamo Paper and Designing Data Intensive Applications. 
 # Architecture
