@@ -19,7 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ClusterService_PingNode_FullMethodName = "/cluster.ClusterService/PingNode"
+	ClusterService_PingNode_FullMethodName    = "/cluster.ClusterService/PingNode"
+	ClusterService_PingReqNode_FullMethodName = "/cluster.ClusterService/PingReqNode"
 )
 
 // ClusterServiceClient is the client API for ClusterService service.
@@ -27,6 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ClusterServiceClient interface {
 	PingNode(ctx context.Context, in *Ping, opts ...grpc.CallOption) (*Ack, error)
+	PingReqNode(ctx context.Context, in *PingReq, opts ...grpc.CallOption) (*Ack, error)
 }
 
 type clusterServiceClient struct {
@@ -47,11 +49,22 @@ func (c *clusterServiceClient) PingNode(ctx context.Context, in *Ping, opts ...g
 	return out, nil
 }
 
+func (c *clusterServiceClient) PingReqNode(ctx context.Context, in *PingReq, opts ...grpc.CallOption) (*Ack, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Ack)
+	err := c.cc.Invoke(ctx, ClusterService_PingReqNode_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ClusterServiceServer is the server API for ClusterService service.
 // All implementations must embed UnimplementedClusterServiceServer
 // for forward compatibility.
 type ClusterServiceServer interface {
 	PingNode(context.Context, *Ping) (*Ack, error)
+	PingReqNode(context.Context, *PingReq) (*Ack, error)
 	mustEmbedUnimplementedClusterServiceServer()
 }
 
@@ -64,6 +77,9 @@ type UnimplementedClusterServiceServer struct{}
 
 func (UnimplementedClusterServiceServer) PingNode(context.Context, *Ping) (*Ack, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PingNode not implemented")
+}
+func (UnimplementedClusterServiceServer) PingReqNode(context.Context, *PingReq) (*Ack, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PingReqNode not implemented")
 }
 func (UnimplementedClusterServiceServer) mustEmbedUnimplementedClusterServiceServer() {}
 func (UnimplementedClusterServiceServer) testEmbeddedByValue()                        {}
@@ -104,6 +120,24 @@ func _ClusterService_PingNode_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ClusterService_PingReqNode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PingReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterServiceServer).PingReqNode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterService_PingReqNode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterServiceServer).PingReqNode(ctx, req.(*PingReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ClusterService_ServiceDesc is the grpc.ServiceDesc for ClusterService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -114,6 +148,10 @@ var ClusterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PingNode",
 			Handler:    _ClusterService_PingNode_Handler,
+		},
+		{
+			MethodName: "PingReqNode",
+			Handler:    _ClusterService_PingReqNode_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
