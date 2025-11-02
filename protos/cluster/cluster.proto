@@ -13,23 +13,24 @@ enum NodeState {
 message NodeUpdate {
   string address = 1;
   int64 incarnation=2;
-  NodeState state=3;
+  int64 piggyBackCount=3;
+  NodeState state=4;
 }
 
 message Ack {
   string from = 1;
-  repeated NodeUpdate updates=2;
+  map<string, NodeUpdate> updates=2;
 }
 
 message Ping {
   string from = 1;
-  repeated NodeUpdate updates=2;
+  map<string, NodeUpdate> updates=2;
 }
 
 message PingReq{
   string from = 1;
   string target=2;
-  repeated NodeUpdate updates=3;
+  map<string, NodeUpdate> updates=3;
 }
 
 service ClusterService{

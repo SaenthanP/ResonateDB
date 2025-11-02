@@ -71,12 +71,13 @@ func (NodeState) EnumDescriptor() ([]byte, []int) {
 }
 
 type NodeUpdate struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	Incarnation   int64                  `protobuf:"varint,2,opt,name=incarnation,proto3" json:"incarnation,omitempty"`
-	State         NodeState              `protobuf:"varint,3,opt,name=state,proto3,enum=cluster.NodeState" json:"state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Address        string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Incarnation    int64                  `protobuf:"varint,2,opt,name=incarnation,proto3" json:"incarnation,omitempty"`
+	PiggyBackCount int64                  `protobuf:"varint,3,opt,name=piggyBackCount,proto3" json:"piggyBackCount,omitempty"`
+	State          NodeState              `protobuf:"varint,4,opt,name=state,proto3,enum=cluster.NodeState" json:"state,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *NodeUpdate) Reset() {
@@ -123,6 +124,13 @@ func (x *NodeUpdate) GetIncarnation() int64 {
 	return 0
 }
 
+func (x *NodeUpdate) GetPiggyBackCount() int64 {
+	if x != nil {
+		return x.PiggyBackCount
+	}
+	return 0
+}
+
 func (x *NodeUpdate) GetState() NodeState {
 	if x != nil {
 		return x.State
@@ -133,7 +141,7 @@ func (x *NodeUpdate) GetState() NodeState {
 type Ack struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	From          string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	Updates       []*NodeUpdate          `protobuf:"bytes,2,rep,name=updates,proto3" json:"updates,omitempty"`
+	Updates       map[string]*NodeUpdate `protobuf:"bytes,2,rep,name=updates,proto3" json:"updates,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -175,7 +183,7 @@ func (x *Ack) GetFrom() string {
 	return ""
 }
 
-func (x *Ack) GetUpdates() []*NodeUpdate {
+func (x *Ack) GetUpdates() map[string]*NodeUpdate {
 	if x != nil {
 		return x.Updates
 	}
@@ -185,7 +193,7 @@ func (x *Ack) GetUpdates() []*NodeUpdate {
 type Ping struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	From          string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
-	Updates       []*NodeUpdate          `protobuf:"bytes,2,rep,name=updates,proto3" json:"updates,omitempty"`
+	Updates       map[string]*NodeUpdate `protobuf:"bytes,2,rep,name=updates,proto3" json:"updates,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -227,7 +235,7 @@ func (x *Ping) GetFrom() string {
 	return ""
 }
 
-func (x *Ping) GetUpdates() []*NodeUpdate {
+func (x *Ping) GetUpdates() map[string]*NodeUpdate {
 	if x != nil {
 		return x.Updates
 	}
@@ -238,7 +246,7 @@ type PingReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	From          string                 `protobuf:"bytes,1,opt,name=from,proto3" json:"from,omitempty"`
 	Target        string                 `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
-	Updates       []*NodeUpdate          `protobuf:"bytes,3,rep,name=updates,proto3" json:"updates,omitempty"`
+	Updates       map[string]*NodeUpdate `protobuf:"bytes,3,rep,name=updates,proto3" json:"updates,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -287,7 +295,7 @@ func (x *PingReq) GetTarget() string {
 	return ""
 }
 
-func (x *PingReq) GetUpdates() []*NodeUpdate {
+func (x *PingReq) GetUpdates() map[string]*NodeUpdate {
 	if x != nil {
 		return x.Updates
 	}
@@ -298,22 +306,32 @@ var File_protos_cluster_cluster_proto protoreflect.FileDescriptor
 
 const file_protos_cluster_cluster_proto_rawDesc = "" +
 	"\n" +
-	"\x1cprotos/cluster/cluster.proto\x12\acluster\"r\n" +
+	"\x1cprotos/cluster/cluster.proto\x12\acluster\"\x9a\x01\n" +
 	"\n" +
 	"NodeUpdate\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12 \n" +
-	"\vincarnation\x18\x02 \x01(\x03R\vincarnation\x12(\n" +
-	"\x05state\x18\x03 \x01(\x0e2\x12.cluster.NodeStateR\x05state\"H\n" +
+	"\vincarnation\x18\x02 \x01(\x03R\vincarnation\x12&\n" +
+	"\x0epiggyBackCount\x18\x03 \x01(\x03R\x0epiggyBackCount\x12(\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x12.cluster.NodeStateR\x05state\"\x9f\x01\n" +
 	"\x03Ack\x12\x12\n" +
-	"\x04from\x18\x01 \x01(\tR\x04from\x12-\n" +
-	"\aupdates\x18\x02 \x03(\v2\x13.cluster.NodeUpdateR\aupdates\"I\n" +
+	"\x04from\x18\x01 \x01(\tR\x04from\x123\n" +
+	"\aupdates\x18\x02 \x03(\v2\x19.cluster.Ack.UpdatesEntryR\aupdates\x1aO\n" +
+	"\fUpdatesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
+	"\x05value\x18\x02 \x01(\v2\x13.cluster.NodeUpdateR\x05value:\x028\x01\"\xa1\x01\n" +
 	"\x04Ping\x12\x12\n" +
-	"\x04from\x18\x01 \x01(\tR\x04from\x12-\n" +
-	"\aupdates\x18\x02 \x03(\v2\x13.cluster.NodeUpdateR\aupdates\"d\n" +
+	"\x04from\x18\x01 \x01(\tR\x04from\x124\n" +
+	"\aupdates\x18\x02 \x03(\v2\x1a.cluster.Ping.UpdatesEntryR\aupdates\x1aO\n" +
+	"\fUpdatesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
+	"\x05value\x18\x02 \x01(\v2\x13.cluster.NodeUpdateR\x05value:\x028\x01\"\xbf\x01\n" +
 	"\aPingReq\x12\x12\n" +
 	"\x04from\x18\x01 \x01(\tR\x04from\x12\x16\n" +
-	"\x06target\x18\x02 \x01(\tR\x06target\x12-\n" +
-	"\aupdates\x18\x03 \x03(\v2\x13.cluster.NodeUpdateR\aupdates*-\n" +
+	"\x06target\x18\x02 \x01(\tR\x06target\x127\n" +
+	"\aupdates\x18\x03 \x03(\v2\x1d.cluster.PingReq.UpdatesEntryR\aupdates\x1aO\n" +
+	"\fUpdatesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12)\n" +
+	"\x05value\x18\x02 \x01(\v2\x13.cluster.NodeUpdateR\x05value:\x028\x01*-\n" +
 	"\tNodeState\x12\t\n" +
 	"\x05ALIVE\x10\x00\x12\v\n" +
 	"\aSUSPECT\x10\x01\x12\b\n" +
@@ -335,28 +353,34 @@ func file_protos_cluster_cluster_proto_rawDescGZIP() []byte {
 }
 
 var file_protos_cluster_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_protos_cluster_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_protos_cluster_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_protos_cluster_cluster_proto_goTypes = []any{
 	(NodeState)(0),     // 0: cluster.NodeState
 	(*NodeUpdate)(nil), // 1: cluster.NodeUpdate
 	(*Ack)(nil),        // 2: cluster.Ack
 	(*Ping)(nil),       // 3: cluster.Ping
 	(*PingReq)(nil),    // 4: cluster.PingReq
+	nil,                // 5: cluster.Ack.UpdatesEntry
+	nil,                // 6: cluster.Ping.UpdatesEntry
+	nil,                // 7: cluster.PingReq.UpdatesEntry
 }
 var file_protos_cluster_cluster_proto_depIdxs = []int32{
 	0, // 0: cluster.NodeUpdate.state:type_name -> cluster.NodeState
-	1, // 1: cluster.Ack.updates:type_name -> cluster.NodeUpdate
-	1, // 2: cluster.Ping.updates:type_name -> cluster.NodeUpdate
-	1, // 3: cluster.PingReq.updates:type_name -> cluster.NodeUpdate
-	3, // 4: cluster.ClusterService.PingNode:input_type -> cluster.Ping
-	4, // 5: cluster.ClusterService.PingReqNode:input_type -> cluster.PingReq
-	2, // 6: cluster.ClusterService.PingNode:output_type -> cluster.Ack
-	2, // 7: cluster.ClusterService.PingReqNode:output_type -> cluster.Ack
-	6, // [6:8] is the sub-list for method output_type
-	4, // [4:6] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 1: cluster.Ack.updates:type_name -> cluster.Ack.UpdatesEntry
+	6, // 2: cluster.Ping.updates:type_name -> cluster.Ping.UpdatesEntry
+	7, // 3: cluster.PingReq.updates:type_name -> cluster.PingReq.UpdatesEntry
+	1, // 4: cluster.Ack.UpdatesEntry.value:type_name -> cluster.NodeUpdate
+	1, // 5: cluster.Ping.UpdatesEntry.value:type_name -> cluster.NodeUpdate
+	1, // 6: cluster.PingReq.UpdatesEntry.value:type_name -> cluster.NodeUpdate
+	3, // 7: cluster.ClusterService.PingNode:input_type -> cluster.Ping
+	4, // 8: cluster.ClusterService.PingReqNode:input_type -> cluster.PingReq
+	2, // 9: cluster.ClusterService.PingNode:output_type -> cluster.Ack
+	2, // 10: cluster.ClusterService.PingReqNode:output_type -> cluster.Ack
+	9, // [9:11] is the sub-list for method output_type
+	7, // [7:9] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_protos_cluster_cluster_proto_init() }
@@ -370,7 +394,7 @@ func file_protos_cluster_cluster_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_protos_cluster_cluster_proto_rawDesc), len(file_protos_cluster_cluster_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
