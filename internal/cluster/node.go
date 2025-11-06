@@ -16,6 +16,9 @@ const (
 	Suspect
 	Fail
 )
+const (
+	K = 3
+)
 
 func (s ServerState) ToProto() pb.NodeState {
 	switch s {
@@ -43,9 +46,9 @@ type Peer struct {
 }
 
 type Node struct {
-	Address string
-	Peers   map[string]*Peer
-	updates map[string]NodeUpdate
+	Address     string
+	Peers       map[string]*Peer
+	updates     map[string]NodeUpdate
 	Incarnation int
 }
 
@@ -86,11 +89,11 @@ func (n *Node) mergeUpdates(peerUpdates map[string]*pb.NodeUpdate) {
 		if u == nil {
 			continue
 		}
-		
-		if addr==n.Address{
-			if (u.State==pb.NodeState(Suspect) ||u.State==pb.NodeState(Fail))&&u.Incarnation<int64(n.Incarnation){
+
+		if addr == n.Address {
+			if (u.State == pb.NodeState(Suspect) || u.State == pb.NodeState(Fail)) && u.Incarnation < int64(n.Incarnation) {
 				n.Incarnation++
-				n.updates[n.Address]=NodeUpdate{
+				n.updates[n.Address] = NodeUpdate{
 					Address:        n.Address,
 					Incarnation:    n.Incarnation,
 					PiggyBackCount: 0,
@@ -143,6 +146,24 @@ func (n *Node) getNodeToPing() *Peer {
 
 	randomKey := keys[rand.Intn(len(keys))]
 	return n.Peers[randomKey]
+}
+
+func (n *Node) getKNodesToPing() []*Peer {
+	candidates := make([]*Peer, 0)
+
+	for _, peer := range n.Peers {
+		if peer.State == Fail {
+			continue
+		}
+		candidates = append(candidates, peer)
+	}
+	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
+
+	if len(candidates) < K {
+		return candidates
+	}
+
+	return candidates[:K]
 }
 
 func NewPeer(address string) (*Peer, error) {
