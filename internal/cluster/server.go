@@ -58,7 +58,7 @@ func (s *Server) PingReqNode(ctx context.Context, in *pb.PingReq) (*pb.Ack, erro
 	targetAddress := in.Target
 	_, targetExists := s.Node.Peers[targetAddress]
 	if !targetExists {
-		peer, err := NewPeer(peerAddress)
+		peer, err := NewPeer(targetAddress)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to create peer: %v", err)
 		}

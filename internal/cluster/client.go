@@ -35,7 +35,7 @@ func (n *Node) Ping(ctx context.Context) {
 
 }
 
-func (n *Node) PingReq(ctx context.Context, target string) (bool, []error) {
+func (n *Node) PingReq(ctx context.Context, target string) []error {
 	peers := n.getKNodesToPing()
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(2*time.Minute))
 	defer cancel()
@@ -48,6 +48,7 @@ func (n *Node) PingReq(ctx context.Context, target string) (bool, []error) {
 		wg.Add(1)
 
 		go func(peer *Peer) {
+			defer wg.Done()
 			ack, err := peer.Client.PingReqNode(ctx, &cluster.PingReq{
 				From:    n.Address,
 				Target:  target,
@@ -65,16 +66,16 @@ func (n *Node) PingReq(ctx context.Context, target string) (bool, []error) {
 		close(resultChan)
 	}()
 
-	success := false
 	var errors []error
 	for res := range resultChan {
 		if res.Err != nil {
 			errors = append(errors, res.Err)
 		} else {
-			success = true
+			n.mergeUpdates(res.Ack.Updates)
 			cancel()
-
 		}
 	}
-	return success, errors
+	
+	n.markSuspect(target)
+	return errors
 }

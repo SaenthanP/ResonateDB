@@ -67,6 +67,7 @@ func NewNode(nodeAddress string, seedAddresses []string) *Node {
 	return &Node{
 		Address: nodeAddress,
 		Peers:   peers,
+		// TODO add myself to updates list
 		updates: make(map[string]NodeUpdate),
 	}
 }
@@ -91,7 +92,7 @@ func (n *Node) mergeUpdates(peerUpdates map[string]*pb.NodeUpdate) {
 		}
 
 		if addr == n.Address {
-			if (u.State == pb.NodeState(Suspect) || u.State == pb.NodeState(Fail)) && u.Incarnation < int64(n.Incarnation) {
+			if (u.State == pb.NodeState(Suspect) || u.State == pb.NodeState(Fail)) && u.Incarnation >= int64(n.Incarnation) {
 				n.Incarnation++
 				n.updates[n.Address] = NodeUpdate{
 					Address:        n.Address,
@@ -122,7 +123,7 @@ func (n *Node) mergeUpdates(peerUpdates map[string]*pb.NodeUpdate) {
 				State:          incomingState,
 				PiggyBackCount: 0,
 			}
-		} else if u.Incarnation == int64(current.Incarnation) && isStronger(incomingState, current.State) {
+		} else if u.Incarnation == int64(current.Incarnation) && isStronger(incomingState, current.State) && current.State != Fail {
 			current.State = incomingState
 			current.PiggyBackCount = 0
 			n.updates[addr] = current
@@ -165,6 +166,29 @@ func (n *Node) getKNodesToPing() []*Peer {
 
 	return candidates[:K]
 }
+func (n *Node) markSuspect(target string) {
+	_, exists := n.Peers[target]
+	if !exists {
+		return
+	}
+
+	n.Peers[target].State = Suspect
+
+	_, exists = n.updates[target]
+	if !exists {
+		n.updates[target] = NodeUpdate{
+			Address:        target,
+			Incarnation:    0,
+			PiggyBackCount: 0,
+			State:          Suspect,
+		}
+	} else {
+		curr := n.updates[target]
+		curr.Incarnation++
+		curr.State = Suspect
+		n.updates[target] = curr
+	}
+}
 
 func NewPeer(address string) (*Peer, error) {
 	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -178,25 +202,3 @@ func NewPeer(address string) (*Peer, error) {
 		State:  Alive,
 	}, nil
 }
-
-/*
- SWIM PROTOCOL: https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf
--  Failure Detector
-	- Protocol period
-		- must be atleast 3 times the round trip estimate
-		- Node Mi picks random member Mj selected, and pinged, waits for ack within specified timeout
-		- If not within limit, Mi will indirectly pings Mj
-			- Mi gets k random members, and send ping-req(Mj)
-			- each will ping Mj and forward ack from Mj to Mi
-			- at end of protocol period, Mi checks if it received acks from Mj or indirectly, if not will be set to failed state
-			in local member list and hands off update to Dissemination Component.
-- Dissemination Component
-	- Upon detecting failiure, it will multi cast this info to rest of the group as failed
-	- Member receiving this info will delete it from its membership list
-
-- In updated model, instead of failed, set it to SUSPECT state, which the dissemntation component spreads this
-	- after prespecified timeout, it is declared as faulty
-	- seperate Dissemination not needed in the updated model
-
-- Look into incarnation value, updates list, and life time priority
-*/
