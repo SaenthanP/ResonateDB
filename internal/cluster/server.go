@@ -20,7 +20,6 @@ func NewServer(node *Node) *Server {
 func (s *Server) PingNode(ctx context.Context, in *pb.Ping) (*pb.Ack, error) {
 	peerAddress := in.From
 	_, exists := s.Node.Peers[peerAddress]
-
 	if !exists {
 		peer, err := NewPeer(peerAddress)
 		if err != nil {

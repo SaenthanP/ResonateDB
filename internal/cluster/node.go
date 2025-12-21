@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 
@@ -54,7 +55,7 @@ type Node struct {
 
 func NewNode(nodeAddress string, seedAddresses []string) *Node {
 	peers := make(map[string]*Peer)
-
+	fmt.Println(seedAddresses)
 	for _, addr := range seedAddresses {
 		peer, err := NewPeer(addr)
 		if err != nil {
@@ -63,12 +64,18 @@ func NewNode(nodeAddress string, seedAddresses []string) *Node {
 		}
 		peers[addr] = peer
 	}
+	updates := make(map[string]NodeUpdate)
+	updates[nodeAddress] = NodeUpdate{
+		Address:        nodeAddress,
+		Incarnation:    0,
+		PiggyBackCount: 0,
+		State:          Alive,
+	}
 
 	return &Node{
 		Address: nodeAddress,
 		Peers:   peers,
-		// TODO add myself to updates list
-		updates: make(map[string]NodeUpdate),
+		updates: updates,
 	}
 }
 
@@ -106,8 +113,14 @@ func (n *Node) mergeUpdates(peerUpdates map[string]*pb.NodeUpdate) {
 
 		current, exists := n.updates[addr]
 		incomingState := ServerState(u.State)
-
+		// TODO this should be fixed after once I start to add cleanup of failed peers and piggyback count
+		// Maybe add a isConnected flag to the peer
 		if !exists {
+			newPeer, err := NewPeer(addr)
+			if err == nil {
+				n.Peers[addr] = newPeer
+			}
+
 			n.updates[addr] = NodeUpdate{
 				Address:     u.Address,
 				Incarnation: int(u.Incarnation),
@@ -135,9 +148,9 @@ func isStronger(a, b ServerState) bool {
 	return a > b
 }
 
-func (n *Node) getNodeToPing() *Peer {
+func (n *Node) getNodeToPing() (string, *Peer) {
 	if len(n.Peers) == 0 {
-		return nil
+		return "", nil
 	}
 
 	keys := make([]string, 0, len(n.Peers))
@@ -146,7 +159,7 @@ func (n *Node) getNodeToPing() *Peer {
 	}
 
 	randomKey := keys[rand.Intn(len(keys))]
-	return n.Peers[randomKey]
+	return randomKey, n.Peers[randomKey]
 }
 
 func (n *Node) getKNodesToPing() []*Peer {
@@ -184,12 +197,33 @@ func (n *Node) markSuspect(target string) {
 		}
 	} else {
 		curr := n.updates[target]
-		curr.Incarnation++
 		curr.State = Suspect
 		n.updates[target] = curr
 	}
 }
+func (n *Node) markAlive(peerAddress string) {
+	if peer, ok := n.Peers[peerAddress]; ok {
+		peer.State = Alive
+	}
 
+	if u, ok := n.updates[peerAddress]; ok {
+		u.State = Alive
+		u.PiggyBackCount = 0
+		n.updates[peerAddress] = u
+	}
+}
+func (n *Node) addToUpdate(address string) {
+	if _, ok := n.updates[address]; ok {
+		return
+	}
+
+	n.updates[address] = NodeUpdate{
+		Address:        address,
+		Incarnation:    0,
+		PiggyBackCount: 0,
+		State:          Alive,
+	}
+}
 func NewPeer(address string) (*Peer, error) {
 	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {

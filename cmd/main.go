@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net"
@@ -12,36 +13,43 @@ import (
 )
 
 func main() {
-	port := flag.String("port", "", "port of node")
+	address := flag.String("address", "", "address of node")
 	peers := flag.String("peers", "", "list of addresses for peers seperated by commas")
 	flag.Parse()
 
-	if port == nil {
-		fmt.Println("Port missing")
+	if address == nil {
+		fmt.Println("address missing")
 		return
 	}
 	var parsedPeers []string
 	if peers != nil {
 		parsedPeers = strings.Split(*peers, ",")
 	}
-
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%s", *port))
+	fmt.Println(parsedPeers)
+	if len(parsedPeers) == 1 && parsedPeers[0] == "" {
+		parsedPeers = nil
+	}
+	lis, err := net.Listen("tcp", *address)
 	if err != nil {
 		fmt.Printf("failed to listen: %v. \n", err)
 		return
 	}
 
 	s := grpc.NewServer()
-	node := cluster.NewNode(*port, parsedPeers)
+	node := cluster.NewNode(*address, parsedPeers)
 	if node == nil {
 		return
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	node.StartFailureDetector(ctx)
+
 	srv := cluster.NewServer(node)
 	pb.RegisterClusterServiceServer(s, srv)
-	fmt.Printf("server started on port %s \n", *port)
+	fmt.Printf("server started on address %s \n", *address)
 	if err := s.Serve(lis); err != nil {
 		fmt.Printf("failed to serve: %v", err)
 	}
-	
+
 }

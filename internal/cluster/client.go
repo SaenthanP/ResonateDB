@@ -15,11 +15,18 @@ type PingReqResult struct {
 }
 
 func (n *Node) Ping(ctx context.Context) {
-	peer := n.getNodeToPing()
+	if len(n.Peers) == 0 {
+		fmt.Println("no peers")
+		return
+	}
+
+	peerAddress, peer := n.getNodeToPing()
+	fmt.Printf("Start pinging node: %s\n", peerAddress)
 	if peer == nil {
 		fmt.Println("Peer not available to Ping")
 		return
 	}
+	n.addToUpdate(peerAddress)
 	updates := n.toProtoUpdates()
 	req := cluster.Ping{
 		From:    n.Address,
@@ -29,14 +36,22 @@ func (n *Node) Ping(ctx context.Context) {
 	// TODO add a timeout here that is predetermined
 	ack, err := peer.Client.PingNode(ctx, &req)
 	if err == nil {
+		peer.State = Alive
+		n.markAlive(peerAddress)
+		// fmt.Println("reach success, ")
 		n.mergeUpdates(ack.Updates)
 		return
 	}
 
+	pingReqErr := n.PingReq(ctx, peerAddress)
+	fmt.Println(pingReqErr)
 }
 
 func (n *Node) PingReq(ctx context.Context, target string) []error {
+	fmt.Printf("Start pinging req node: %s\n", target)
+
 	peers := n.getKNodesToPing()
+	n.addToUpdate(target)
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(2*time.Minute))
 	defer cancel()
 
@@ -71,11 +86,12 @@ func (n *Node) PingReq(ctx context.Context, target string) []error {
 		if res.Err != nil {
 			errors = append(errors, res.Err)
 		} else {
+			n.markAlive(target)
 			n.mergeUpdates(res.Ack.Updates)
-			cancel()
+			return nil
 		}
 	}
-	
+
 	n.markSuspect(target)
 	return errors
 }
