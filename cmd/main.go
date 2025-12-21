@@ -36,7 +36,7 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	node := cluster.NewNode(*address, parsedPeers)
+	node := cluster.NewNode(*address, parsedPeers, cluster.GrpcPeerFactory())
 	if node == nil {
 		return
 	}

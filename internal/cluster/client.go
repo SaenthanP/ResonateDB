@@ -27,19 +27,18 @@ func (n *Node) Ping(ctx context.Context) {
 		return
 	}
 	n.addToUpdate(peerAddress)
-	updates := n.toProtoUpdates()
-	req := cluster.Ping{
+	req := PingRequest{
 		From:    n.Address,
-		Updates: updates,
+		Updates: n.updates,
 	}
 
 	// TODO add a timeout here that is predetermined
-	ack, err := peer.Client.PingNode(ctx, &req)
+	ack, err := peer.Client.Ping(ctx, peerAddress, req)
 	if err == nil {
 		peer.State = Alive
 		n.markAlive(peerAddress)
 		// fmt.Println("reach success, ")
-		n.mergeUpdates(ack.Updates)
+		n.mergeUpdates(fromProtoUpdates(ack.Updates))
 		return
 	}
 

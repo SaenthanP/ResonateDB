@@ -6,8 +6,6 @@ import (
 	"math/rand"
 
 	pb "github.com/saenthan/resonatedb/proto-gen/cluster"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 type ServerState int
@@ -20,6 +18,8 @@ const (
 const (
 	K = 3
 )
+
+type PeerFactory func(address string) (*Peer, error)
 
 func (s ServerState) ToProto() pb.NodeState {
 	switch s {
@@ -42,7 +42,7 @@ type NodeUpdate struct {
 }
 
 type Peer struct {
-	Client pb.ClusterServiceClient
+	Client Transport
 	State  ServerState
 }
 
@@ -51,13 +51,29 @@ type Node struct {
 	Peers       map[string]*Peer
 	updates     map[string]NodeUpdate
 	Incarnation int
+
+	newPeer PeerFactory
 }
 
-func NewNode(nodeAddress string, seedAddresses []string) *Node {
+// func NewPeer(address string) (*Peer, error) {
+// 	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	client := pb.NewClusterServiceClient(conn)
+// 	return &Peer{
+// 		Client: client,
+// 		State:  Alive,
+// 	}, nil
+// }
+
+func NewNode(nodeAddress string, seedAddresses []string, newPeer PeerFactory,
+) *Node {
 	peers := make(map[string]*Peer)
 	fmt.Println(seedAddresses)
 	for _, addr := range seedAddresses {
-		peer, err := NewPeer(addr)
+		peer, err := newPeer(addr)
 		if err != nil {
 			log.Fatalf("failed to connect to peer %s: %v", addr, err)
 
@@ -76,6 +92,7 @@ func NewNode(nodeAddress string, seedAddresses []string) *Node {
 		Address: nodeAddress,
 		Peers:   peers,
 		updates: updates,
+		newPeer: newPeer,
 	}
 }
 
@@ -116,7 +133,7 @@ func (n *Node) mergeUpdates(peerUpdates map[string]*pb.NodeUpdate) {
 		// TODO this should be fixed after once I start to add cleanup of failed peers and piggyback count
 		// Maybe add a isConnected flag to the peer
 		if !exists {
-			newPeer, err := NewPeer(addr)
+			newPeer, err := n.newPeer(addr)
 			if err == nil {
 				n.Peers[addr] = newPeer
 			}
@@ -223,16 +240,4 @@ func (n *Node) addToUpdate(address string) {
 		PiggyBackCount: 0,
 		State:          Alive,
 	}
-}
-func NewPeer(address string) (*Peer, error) {
-	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, err
-	}
-
-	client := pb.NewClusterServiceClient(conn)
-	return &Peer{
-		Client: client,
-		State:  Alive,
-	}, nil
 }
