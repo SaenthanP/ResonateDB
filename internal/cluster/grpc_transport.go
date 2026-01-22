@@ -17,7 +17,6 @@ func NewGRPCTransport(client pb.ClusterServiceClient) *GRPCTransport {
 }
 func (g *GRPCTransport) Ping(
 	ctx context.Context,
-	target string,
 	req PingRequest,
 ) (PingResponse, error) {
 
@@ -37,7 +36,6 @@ func (g *GRPCTransport) Ping(
 
 func (g *GRPCTransport) PingReq(
 	ctx context.Context,
-	via string,
 	target string,
 	req PingRequest,
 ) (PingResponse, error) {

@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/saenthan/resonatedb/proto-gen/cluster"
 )
 
 type PingReqResult struct {
-	Ack *cluster.Ack
+	Ack PingResponse
 	Err error
 }
 
@@ -33,12 +31,12 @@ func (n *Node) Ping(ctx context.Context) {
 	}
 
 	// TODO add a timeout here that is predetermined
-	ack, err := peer.Client.Ping(ctx, peerAddress, req)
+	ack, err := peer.Client.Ping(ctx, req)
 	if err == nil {
 		peer.State = Alive
 		n.markAlive(peerAddress)
 		// fmt.Println("reach success, ")
-		n.mergeUpdates(fromProtoUpdates(ack.Updates))
+		n.mergeUpdates(ack.Updates)
 		return
 	}
 
@@ -54,7 +52,6 @@ func (n *Node) PingReq(ctx context.Context, target string) []error {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(2*time.Minute))
 	defer cancel()
 
-	updates := n.toProtoUpdates()
 	var wg sync.WaitGroup
 
 	resultChan := make(chan PingReqResult, len(peers))
@@ -63,10 +60,9 @@ func (n *Node) PingReq(ctx context.Context, target string) []error {
 
 		go func(peer *Peer) {
 			defer wg.Done()
-			ack, err := peer.Client.PingReqNode(ctx, &cluster.PingReq{
+			ack, err := peer.Client.PingReq(ctx, target, PingRequest{
 				From:    n.Address,
-				Target:  target,
-				Updates: updates,
+				Updates: n.updates,
 			})
 			resultChan <- PingReqResult{
 				Ack: ack,

@@ -1,11 +1,14 @@
 package cluster
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math/rand"
 
 	pb "github.com/saenthan/resonatedb/proto-gen/cluster"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type ServerState int
@@ -55,19 +58,6 @@ type Node struct {
 	newPeer PeerFactory
 }
 
-// func NewPeer(address string) (*Peer, error) {
-// 	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(insecure.NewCredentials()))
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	client := pb.NewClusterServiceClient(conn)
-// 	return &Peer{
-// 		Client: client,
-// 		State:  Alive,
-// 	}, nil
-// }
-
 func NewNode(nodeAddress string, seedAddresses []string, newPeer PeerFactory,
 ) *Node {
 	peers := make(map[string]*Peer)
@@ -109,14 +99,10 @@ func (n *Node) toProtoUpdates() map[string]*pb.NodeUpdate {
 	return result
 }
 
-func (n *Node) mergeUpdates(peerUpdates map[string]*pb.NodeUpdate) {
+func (n *Node) mergeUpdates(peerUpdates map[string]NodeUpdate) {
 	for addr, u := range peerUpdates {
-		if u == nil {
-			continue
-		}
-
 		if addr == n.Address {
-			if (u.State == pb.NodeState(Suspect) || u.State == pb.NodeState(Fail)) && u.Incarnation >= int64(n.Incarnation) {
+			if (u.State == Suspect || u.State == Fail) && u.Incarnation >= n.Incarnation {
 				n.Incarnation++
 				n.updates[n.Address] = NodeUpdate{
 					Address:        n.Address,
@@ -146,14 +132,14 @@ func (n *Node) mergeUpdates(peerUpdates map[string]*pb.NodeUpdate) {
 			continue
 		}
 
-		if u.Incarnation > int64(current.Incarnation) {
+		if u.Incarnation > current.Incarnation {
 			n.updates[addr] = NodeUpdate{
 				Address:        u.Address,
 				Incarnation:    int(u.Incarnation),
 				State:          incomingState,
 				PiggyBackCount: 0,
 			}
-		} else if u.Incarnation == int64(current.Incarnation) && isStronger(incomingState, current.State) && current.State != Fail {
+		} else if u.Incarnation == current.Incarnation && isStronger(incomingState, current.State) && current.State != Fail {
 			current.State = incomingState
 			current.PiggyBackCount = 0
 			n.updates[addr] = current
@@ -240,4 +226,69 @@ func (n *Node) addToUpdate(address string) {
 		PiggyBackCount: 0,
 		State:          Alive,
 	}
+}
+
+func (n *Node) HandlePing(ctx context.Context, fromAddr string, updates map[string]NodeUpdate) (PingResponse, error) {
+	_, exists := n.Peers[fromAddr]
+	if !exists {
+		peer, err := n.newPeer(fromAddr)
+		if err != nil {
+			return PingResponse{}, fmt.Errorf("failed to create new peer %w", err)
+		}
+		n.Peers[fromAddr] = peer
+	}
+
+	if len(updates) > 0 {
+		n.mergeUpdates(updates)
+	}
+
+	return PingResponse{
+		From:    fromAddr,
+		Updates: n.updates,
+	}, nil
+}
+func (n *Node) HandlePingReq(ctx context.Context, fromAddr string, targetAddr string, updates map[string]NodeUpdate) (PingResponse, error) {
+
+	_, exists := n.Peers[fromAddr]
+
+	if !exists {
+		peer, err := n.newPeer(fromAddr)
+		if err != nil {
+			return PingResponse{}, status.Errorf(codes.Internal, "failed to create peer: %v", err)
+		}
+		n.Peers[fromAddr] = peer
+	}
+
+	if len(updates) > 0 {
+		n.mergeUpdates(updates)
+	}
+
+	_, targetExists := n.Peers[targetAddr]
+	if !targetExists {
+		peer, err := n.newPeer(targetAddr)
+		if err != nil {
+			return PingResponse{}, status.Errorf(codes.Internal, "failed to create peer: %v", err)
+		}
+		n.Peers[targetAddr] = peer
+	}
+
+	// TODO: do you pass current node address or the parent caller
+	input := PingRequest{
+		From:    n.Address,
+		Updates: updates,
+	}
+
+	ack, err := n.Peers[targetAddr].Client.Ping(ctx, input)
+	if err != nil {
+		return PingResponse{}, status.Errorf(codes.Internal, "failed to connect to target node: %v", err)
+	}
+
+	if len(ack.Updates) > 0 {
+		n.mergeUpdates(ack.Updates)
+	}
+
+	return PingResponse{
+		From:    n.Address,
+		Updates: n.updates,
+	}, nil
 }

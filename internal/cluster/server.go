@@ -8,78 +8,42 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+type Agent interface {
+	HandlePing(ctx context.Context, fromAddr string, updates map[string]NodeUpdate) (PingResponse, error)
+	HandlePingReq(ctx context.Context, fromAddr string, targetAddr string, updates map[string]NodeUpdate) (PingResponse, error)
+}
+
 type Server struct {
-	Node *Node
+	Agent Agent
 	pb.UnimplementedClusterServiceServer
 }
 
-func NewServer(node *Node) *Server {
-	return &Server{Node: node}
+func NewServer(Agent Agent) *Server {
+	return &Server{Agent: Agent}
 }
 
 func (s *Server) PingNode(ctx context.Context, in *pb.Ping) (*pb.Ack, error) {
-	peerAddress := in.From
-	_, exists := s.Node.Peers[peerAddress]
-	if !exists {
-		peer, err := NewPeer(peerAddress)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to create peer: %v", err)
-		}
-		s.Node.Peers[peerAddress] = peer
-	}
+	resp, err := s.Agent.HandlePing(ctx, in.From, fromProtoUpdates(in.Updates))
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to handle PingNode: %v", err)
 
-	if len(in.Updates) > 0 {
-		s.Node.mergeUpdates(in.Updates)
 	}
 
 	return &pb.Ack{
-		From:    s.Node.Address,
-		Updates: s.Node.toProtoUpdates(),
+		From:    resp.From,
+		Updates: toProtoUpdates(resp.Updates),
 	}, nil
 }
 
 func (s *Server) PingReqNode(ctx context.Context, in *pb.PingReq) (*pb.Ack, error) {
-	peerAddress := in.From
-	_, exists := s.Node.Peers[peerAddress]
-
-	if !exists {
-		peer, err := NewPeer(peerAddress)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to create peer: %v", err)
-		}
-		s.Node.Peers[peerAddress] = peer
-	}
-
-	if len(in.Updates) > 0 {
-		s.Node.mergeUpdates(in.Updates)
-	}
-
-	targetAddress := in.Target
-	_, targetExists := s.Node.Peers[targetAddress]
-	if !targetExists {
-		peer, err := NewPeer(targetAddress)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to create peer: %v", err)
-		}
-		s.Node.Peers[targetAddress] = peer
-	}
-
-	input := &pb.Ping{
-		From:    s.Node.Address,
-		Updates: s.Node.toProtoUpdates(),
-	}
-
-	ack, err := s.Node.Peers[targetAddress].Client.PingNode(ctx, input)
+	resp, err := s.Agent.HandlePingReq(ctx, in.From, in.Target, fromProtoUpdates(in.Updates))
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to connect to target node: %v", err)
-	}
+		return nil, status.Errorf(codes.Internal, "failed to handle PingReqNode: %v", err)
 
-	if len(ack.Updates) > 0 {
-		s.Node.mergeUpdates(ack.Updates)
 	}
 
 	return &pb.Ack{
-		From:    s.Node.Address,
-		Updates: s.Node.toProtoUpdates(),
+		From:    resp.From,
+		Updates: toProtoUpdates(resp.Updates),
 	}, nil
 }
