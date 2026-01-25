@@ -13,62 +13,59 @@ type PingReqResult struct {
 }
 
 func (n *Node) Ping(ctx context.Context) {
-	if len(n.Peers) == 0 {
+	if len(n.updates) == 0 {
 		fmt.Println("no peers")
 		return
 	}
 
-	peerAddress, peer := n.getNodeToPing()
-	fmt.Printf("Start pinging node: %s\n", peerAddress)
-	if peer == nil {
+	targetNodeAddr := n.getNodeToPing()
+	if targetNodeAddr == "" {
 		fmt.Println("Peer not available to Ping")
 		return
 	}
-	n.addToUpdate(peerAddress)
+	fmt.Printf("Start pinging node: %s\n", targetNodeAddr)
+
 	req := PingRequest{
 		From:    n.Address,
 		Updates: n.updates,
 	}
 
-	// TODO add a timeout here that is predetermined
-	ack, err := peer.Client.Ping(ctx, req)
+	resp, err := n.Transport.Ping(ctx, targetNodeAddr, req)
 	if err == nil {
-		peer.State = Alive
-		n.markAlive(peerAddress)
-		// fmt.Println("reach success, ")
-		n.mergeUpdates(ack.Updates)
+		n.markAlive(targetNodeAddr)
+		n.mergeUpdates(resp.Updates)
 		return
 	}
 
-	pingReqErr := n.PingReq(ctx, peerAddress)
+	pingReqErr := n.PingReq(ctx, targetNodeAddr)
 	fmt.Println(pingReqErr)
 }
 
-func (n *Node) PingReq(ctx context.Context, target string) []error {
-	fmt.Printf("Start pinging req node: %s\n", target)
+func (n *Node) PingReq(ctx context.Context, targetAddr string) []error {
+	fmt.Printf("Start pinging req node: %s\n", targetAddr)
 
 	peers := n.getKNodesToPing()
-	n.addToUpdate(target)
+
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(2*time.Minute))
 	defer cancel()
 
 	var wg sync.WaitGroup
 
 	resultChan := make(chan PingReqResult, len(peers))
-	for _, peer := range peers {
+	for _, peerAddr := range peers {
 		wg.Add(1)
 
-		go func(peer *Peer) {
+		go func(peerAddr string) {
 			defer wg.Done()
-			ack, err := peer.Client.PingReq(ctx, target, PingRequest{
+			resp, err := n.Transport.PingReq(ctx, targetAddr, PingRequest{
 				From:    n.Address,
 				Updates: n.updates,
 			})
 			resultChan <- PingReqResult{
-				Ack: ack,
+				Ack: resp,
 				Err: err,
 			}
-		}(peer)
+		}(peerAddr)
 	}
 
 	go func() {
@@ -81,12 +78,12 @@ func (n *Node) PingReq(ctx context.Context, target string) []error {
 		if res.Err != nil {
 			errors = append(errors, res.Err)
 		} else {
-			n.markAlive(target)
+			n.markAlive(targetAddr)
 			n.mergeUpdates(res.Ack.Updates)
 			return nil
 		}
 	}
 
-	n.markSuspect(target)
+	n.markSuspect(targetAddr)
 	return errors
 }

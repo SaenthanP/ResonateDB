@@ -3,12 +3,9 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 
 	pb "github.com/saenthan/resonatedb/proto-gen/cluster"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type ServerState int
@@ -22,8 +19,7 @@ const (
 	K = 3
 )
 
-type PeerFactory func(address string) (*Peer, error)
-
+// This should be moved to the grpc handler/transport area
 func (s ServerState) ToProto() pb.NodeState {
 	switch s {
 	case Alive:
@@ -44,46 +40,44 @@ type NodeUpdate struct {
 	State          ServerState
 }
 
-type Peer struct {
-	Client Transport
-	State  ServerState
-}
-
 type Node struct {
 	Address     string
-	Peers       map[string]*Peer
 	updates     map[string]NodeUpdate
 	Incarnation int
-
-	newPeer PeerFactory
+	Transport   Transport
 }
 
-func NewNode(nodeAddress string, seedAddresses []string, newPeer PeerFactory,
-) *Node {
-	peers := make(map[string]*Peer)
-	fmt.Println(seedAddresses)
-	for _, addr := range seedAddresses {
-		peer, err := newPeer(addr)
-		if err != nil {
-			log.Fatalf("failed to connect to peer %s: %v", addr, err)
+type Config struct {
+	Address       string
+	SeedAddresses []string
+	Transport     Transport
+}
 
-		}
-		peers[addr] = peer
+func NewNode(cfg Config) *Node {
+	node := &Node{
+		Address:     cfg.Address,
+		updates:     make(map[string]NodeUpdate),
+		Incarnation: 0,
+		Transport:   cfg.Transport,
 	}
-	updates := make(map[string]NodeUpdate)
-	updates[nodeAddress] = NodeUpdate{
-		Address:        nodeAddress,
+
+	node.updates[cfg.Address] = NodeUpdate{
+		Address:        cfg.Address,
 		Incarnation:    0,
 		PiggyBackCount: 0,
 		State:          Alive,
 	}
 
-	return &Node{
-		Address: nodeAddress,
-		Peers:   peers,
-		updates: updates,
-		newPeer: newPeer,
+	for _, addr := range cfg.SeedAddresses {
+		node.updates[addr] = NodeUpdate{
+			Address:        addr,
+			Incarnation:    0,
+			PiggyBackCount: 0,
+			State:          Alive,
+		}
 	}
+
+	return node
 }
 
 func (n *Node) toProtoUpdates() map[string]*pb.NodeUpdate {
@@ -119,11 +113,6 @@ func (n *Node) mergeUpdates(peerUpdates map[string]NodeUpdate) {
 		// TODO this should be fixed after once I start to add cleanup of failed peers and piggyback count
 		// Maybe add a isConnected flag to the peer
 		if !exists {
-			newPeer, err := n.newPeer(addr)
-			if err == nil {
-				n.Peers[addr] = newPeer
-			}
-
 			n.updates[addr] = NodeUpdate{
 				Address:     u.Address,
 				Incarnation: int(u.Incarnation),
@@ -151,28 +140,30 @@ func isStronger(a, b ServerState) bool {
 	return a > b
 }
 
-func (n *Node) getNodeToPing() (string, *Peer) {
-	if len(n.Peers) == 0 {
-		return "", nil
+func (n *Node) getNodeToPing() string {
+	if len(n.updates) == 0 {
+		return ""
 	}
 
-	keys := make([]string, 0, len(n.Peers))
-	for k := range n.Peers {
-		keys = append(keys, k)
+	keys := make([]string, 0, len(n.updates))
+	for addr, node := range n.updates {
+		if addr != n.Address && node.State != Fail {
+			keys = append(keys, addr)
+		}
 	}
 
-	randomKey := keys[rand.Intn(len(keys))]
-	return randomKey, n.Peers[randomKey]
+	randomAddr := keys[rand.Intn(len(keys))]
+	return randomAddr
 }
 
-func (n *Node) getKNodesToPing() []*Peer {
-	candidates := make([]*Peer, 0)
+func (n *Node) getKNodesToPing() []string {
+	candidates := make([]string, 0)
 
-	for _, peer := range n.Peers {
-		if peer.State == Fail {
+	for addr, peer := range n.updates {
+		if peer.State == Fail || n.Address == addr {
 			continue
 		}
-		candidates = append(candidates, peer)
+		candidates = append(candidates, addr)
 	}
 	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
@@ -183,38 +174,32 @@ func (n *Node) getKNodesToPing() []*Peer {
 	return candidates[:K]
 }
 func (n *Node) markSuspect(target string) {
-	_, exists := n.Peers[target]
+
+	_, exists := n.updates[target]
 	if !exists {
 		return
 	}
+	curr := n.updates[target]
+	curr.State = Suspect
+	n.updates[target] = curr
+}
 
-	n.Peers[target].State = Suspect
-
-	_, exists = n.updates[target]
+func (n *Node) markAlive(peerAddress string) {
+	node, exists := n.updates[peerAddress]
 	if !exists {
-		n.updates[target] = NodeUpdate{
-			Address:        target,
+		n.updates[peerAddress] = NodeUpdate{
+			Address:        peerAddress,
 			Incarnation:    0,
 			PiggyBackCount: 0,
-			State:          Suspect,
+			State:          Alive,
 		}
-	} else {
-		curr := n.updates[target]
-		curr.State = Suspect
-		n.updates[target] = curr
-	}
-}
-func (n *Node) markAlive(peerAddress string) {
-	if peer, ok := n.Peers[peerAddress]; ok {
-		peer.State = Alive
+		return
 	}
 
-	if u, ok := n.updates[peerAddress]; ok {
-		u.State = Alive
-		u.PiggyBackCount = 0
-		n.updates[peerAddress] = u
-	}
+	node.State = Alive
+	n.updates[peerAddress] = node
 }
+
 func (n *Node) addToUpdate(address string) {
 	if _, ok := n.updates[address]; ok {
 		return
@@ -228,59 +213,34 @@ func (n *Node) addToUpdate(address string) {
 	}
 }
 
-func (n *Node) HandlePing(ctx context.Context, fromAddr string, updates map[string]NodeUpdate) (PingResponse, error) {
-	_, exists := n.Peers[fromAddr]
-	if !exists {
-		peer, err := n.newPeer(fromAddr)
-		if err != nil {
-			return PingResponse{}, fmt.Errorf("failed to create new peer %w", err)
-		}
-		n.Peers[fromAddr] = peer
-	}
-
-	if len(updates) > 0 {
-		n.mergeUpdates(updates)
+func (n *Node) HandlePing(ctx context.Context, req PingRequest) (PingResponse, error) {
+	if len(req.Updates) > 0 {
+		n.mergeUpdates(req.Updates)
 	}
 
 	return PingResponse{
-		From:    fromAddr,
+		From:    req.From,
 		Updates: n.updates,
 	}, nil
 }
-func (n *Node) HandlePingReq(ctx context.Context, fromAddr string, targetAddr string, updates map[string]NodeUpdate) (PingResponse, error) {
 
-	_, exists := n.Peers[fromAddr]
-
-	if !exists {
-		peer, err := n.newPeer(fromAddr)
-		if err != nil {
-			return PingResponse{}, status.Errorf(codes.Internal, "failed to create peer: %v", err)
-		}
-		n.Peers[fromAddr] = peer
-	}
-
-	if len(updates) > 0 {
-		n.mergeUpdates(updates)
-	}
-
-	_, targetExists := n.Peers[targetAddr]
-	if !targetExists {
-		peer, err := n.newPeer(targetAddr)
-		if err != nil {
-			return PingResponse{}, status.Errorf(codes.Internal, "failed to create peer: %v", err)
-		}
-		n.Peers[targetAddr] = peer
+func (n *Node) HandlePingReq(ctx context.Context, targetAddr string, req PingRequest) (PingResponse, error) {
+	if len(req.Updates) > 0 {
+		n.mergeUpdates(req.Updates)
 	}
 
 	// TODO: do you pass current node address or the parent caller
+	// TODO: When switching to proper concurrency, n.updates should actually send a copy because maps are reference types
 	input := PingRequest{
 		From:    n.Address,
-		Updates: updates,
+		Updates: n.updates,
 	}
 
-	ack, err := n.Peers[targetAddr].Client.Ping(ctx, input)
+	// ack, err := n.Peers[targetAddr].Client.Ping(ctx, input)
+
+	ack, err := n.Transport.Ping(ctx, targetAddr, input)
 	if err != nil {
-		return PingResponse{}, status.Errorf(codes.Internal, "failed to connect to target node: %v", err)
+		return PingResponse{}, fmt.Errorf("failed to forward ping req to: %s from %s with error: %v", targetAddr, n.Address, err)
 	}
 
 	if len(ack.Updates) > 0 {
