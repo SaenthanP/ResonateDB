@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/saenthan/resonatedb/internal/cluster"
 	pb "github.com/saenthan/resonatedb/proto-gen/cluster"
@@ -21,6 +22,7 @@ func main() {
 		fmt.Println("address missing")
 		return
 	}
+	
 	var parsedPeers []string
 	if peers != nil {
 		parsedPeers = strings.Split(*peers, ",")
@@ -36,7 +38,15 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	node := cluster.NewNode(*address, parsedPeers, cluster.GrpcPeerFactory())
+
+	cfg := cluster.Config{
+		Address:       *address,
+		SeedAddresses: parsedPeers,
+		Transport:     cluster.NewGRPCTransport(),
+		SuspectTimeout: time.Millisecond*5000,
+	}
+
+	node := cluster.NewNode(cfg)
 	if node == nil {
 		return
 	}

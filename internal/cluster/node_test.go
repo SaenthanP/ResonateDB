@@ -2,16 +2,14 @@ package cluster
 
 import (
 	"testing"
-
-	pb "github.com/saenthan/resonatedb/proto-gen/cluster"
 )
 
-func protoUpdate(addr string, state ServerState, incarnation int) map[string]*pb.NodeUpdate {
-	return map[string]*pb.NodeUpdate{
+func protoUpdate(addr string, state ServerState, incarnation int) map[string]NodeUpdate {
+	return map[string]NodeUpdate{
 		addr: {
 			Address:     addr,
-			State:       state.ToProto(),
-			Incarnation: int64(incarnation),
+			State:       state,
+			Incarnation: incarnation,
 		},
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"time"
 
 	pb "github.com/saenthan/resonatedb/proto-gen/cluster"
 )
@@ -38,27 +39,31 @@ type NodeUpdate struct {
 	Incarnation    int
 	PiggyBackCount int
 	State          ServerState
+	SuspectedAt    time.Time
 }
 
 type Node struct {
-	Address     string
-	updates     map[string]NodeUpdate
-	Incarnation int
-	Transport   Transport
+	Address        string
+	updates        map[string]NodeUpdate
+	Incarnation    int
+	Transport      Transport
+	SuspectTimeout time.Duration
 }
 
 type Config struct {
-	Address       string
-	SeedAddresses []string
-	Transport     Transport
+	Address        string
+	SeedAddresses  []string
+	Transport      Transport
+	SuspectTimeout time.Duration
 }
 
 func NewNode(cfg Config) *Node {
 	node := &Node{
-		Address:     cfg.Address,
-		updates:     make(map[string]NodeUpdate),
-		Incarnation: 0,
-		Transport:   cfg.Transport,
+		Address:        cfg.Address,
+		updates:        make(map[string]NodeUpdate),
+		Incarnation:    0,
+		Transport:      cfg.Transport,
+		SuspectTimeout: cfg.SuspectTimeout,
 	}
 
 	node.updates[cfg.Address] = NodeUpdate{
@@ -152,6 +157,10 @@ func (n *Node) getNodeToPing() string {
 		}
 	}
 
+	if len(keys) == 0 {
+		return ""
+	}
+
 	randomAddr := keys[rand.Intn(len(keys))]
 	return randomAddr
 }
@@ -174,13 +183,12 @@ func (n *Node) getKNodesToPing() []string {
 	return candidates[:K]
 }
 func (n *Node) markSuspect(target string) {
-
-	_, exists := n.updates[target]
-	if !exists {
+	curr, exists := n.updates[target]
+	if !exists || curr.State == Suspect || curr.State == Fail {
 		return
 	}
-	curr := n.updates[target]
 	curr.State = Suspect
+	curr.SuspectedAt = time.Now()
 	n.updates[target] = curr
 }
 
@@ -213,20 +221,20 @@ func (n *Node) addToUpdate(address string) {
 	}
 }
 
-func (n *Node) HandlePing(ctx context.Context, req PingRequest) (PingResponse, error) {
-	if len(req.Updates) > 0 {
-		n.mergeUpdates(req.Updates)
+func (n *Node) HandlePing(ctx context.Context, fromAddr string, updates map[string]NodeUpdate) (PingResponse, error) {
+	if len(updates) > 0 {
+		n.mergeUpdates(updates)
 	}
 
 	return PingResponse{
-		From:    req.From,
+		From:    fromAddr,
 		Updates: n.updates,
 	}, nil
 }
 
-func (n *Node) HandlePingReq(ctx context.Context, targetAddr string, req PingRequest) (PingResponse, error) {
-	if len(req.Updates) > 0 {
-		n.mergeUpdates(req.Updates)
+func (n *Node) HandlePingReq(ctx context.Context, fromAddr string, targetAddr string, updates map[string]NodeUpdate) (PingResponse, error) {
+	if len(updates) > 0 {
+		n.mergeUpdates(updates)
 	}
 
 	// TODO: do you pass current node address or the parent caller
