@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	pb "github.com/saenthan/resonatedb/proto-gen/cluster"
 	"google.golang.org/grpc"
@@ -10,6 +11,7 @@ import (
 )
 
 type GRPCTransport struct {
+	mu    sync.RWMutex
 	conns map[string]*grpc.ClientConn
 }
 
@@ -18,7 +20,10 @@ func NewGRPCTransport() *GRPCTransport {
 }
 
 func (g *GRPCTransport) getConn(addr string) (*grpc.ClientConn, error) {
+	g.mu.RLock()
 	conn, exists := g.conns[addr]
+	g.mu.RUnlock()
+
 	if exists {
 		return conn, nil
 	}
@@ -27,6 +32,15 @@ func (g *GRPCTransport) getConn(addr string) (*grpc.ClientConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new peer connection for addr: %s with error %v", addr, err)
 	}
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	// Close the existing connection if one was created when setting up client
+	if existingConn, exists := g.conns[addr]; exists {
+		conn.Close()
+		return existingConn, nil
+	}
+
 	g.conns[addr] = conn
 	return conn, nil
 }

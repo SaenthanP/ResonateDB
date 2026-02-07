@@ -33,6 +33,9 @@ func (n *Node) StartFailureDetector(ctx context.Context) {
 }
 
 func (n *Node) runSuspectNodeCleanup(ctx context.Context) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	for addr, update := range n.updates {
 		if addr == n.Address {
 			continue

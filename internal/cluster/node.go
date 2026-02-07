@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	pb "github.com/saenthan/resonatedb/proto-gen/cluster"
@@ -43,6 +44,7 @@ type NodeUpdate struct {
 }
 
 type Node struct {
+	mu             sync.RWMutex
 	Address        string
 	updates        map[string]NodeUpdate
 	Incarnation    int
@@ -85,20 +87,10 @@ func NewNode(cfg Config) *Node {
 	return node
 }
 
-func (n *Node) toProtoUpdates() map[string]*pb.NodeUpdate {
-	result := make(map[string]*pb.NodeUpdate, len(n.updates))
-	for addr, u := range n.updates {
-		result[addr] = &pb.NodeUpdate{
-			Address:        u.Address,
-			Incarnation:    int64(u.Incarnation),
-			PiggyBackCount: int64(u.PiggyBackCount),
-			State:          u.State.ToProto(),
-		}
-	}
-	return result
-}
-
 func (n *Node) mergeUpdates(peerUpdates map[string]NodeUpdate) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	for addr, u := range peerUpdates {
 		if addr == n.Address {
 			if (u.State == Suspect || u.State == Fail) && u.Incarnation >= n.Incarnation {
@@ -146,6 +138,9 @@ func isStronger(a, b ServerState) bool {
 }
 
 func (n *Node) getNodeToPing() string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
 	if len(n.updates) == 0 {
 		return ""
 	}
@@ -166,6 +161,9 @@ func (n *Node) getNodeToPing() string {
 }
 
 func (n *Node) getKNodesToPing() []string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
 	candidates := make([]string, 0)
 
 	for addr, peer := range n.updates {
@@ -182,7 +180,11 @@ func (n *Node) getKNodesToPing() []string {
 
 	return candidates[:K]
 }
+
 func (n *Node) markSuspect(target string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	curr, exists := n.updates[target]
 	if !exists || curr.State == Suspect || curr.State == Fail {
 		return
@@ -193,6 +195,9 @@ func (n *Node) markSuspect(target string) {
 }
 
 func (n *Node) markAlive(peerAddress string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	node, exists := n.updates[peerAddress]
 	if !exists {
 		n.updates[peerAddress] = NodeUpdate{
@@ -208,19 +213,6 @@ func (n *Node) markAlive(peerAddress string) {
 	n.updates[peerAddress] = node
 }
 
-func (n *Node) addToUpdate(address string) {
-	if _, ok := n.updates[address]; ok {
-		return
-	}
-
-	n.updates[address] = NodeUpdate{
-		Address:        address,
-		Incarnation:    0,
-		PiggyBackCount: 0,
-		State:          Alive,
-	}
-}
-
 func (n *Node) HandlePing(ctx context.Context, fromAddr string, updates map[string]NodeUpdate) (PingResponse, error) {
 	if len(updates) > 0 {
 		n.mergeUpdates(updates)
@@ -228,7 +220,7 @@ func (n *Node) HandlePing(ctx context.Context, fromAddr string, updates map[stri
 
 	return PingResponse{
 		From:    fromAddr,
-		Updates: n.updates,
+		Updates: n.getUpdatesCopy(),
 	}, nil
 }
 
@@ -241,7 +233,7 @@ func (n *Node) HandlePingReq(ctx context.Context, fromAddr string, targetAddr st
 	// TODO: When switching to proper concurrency, n.updates should actually send a copy because maps are reference types
 	input := PingRequest{
 		From:    n.Address,
-		Updates: n.updates,
+		Updates: n.getUpdatesCopy(),
 	}
 
 	// ack, err := n.Peers[targetAddr].Client.Ping(ctx, input)
@@ -259,4 +251,23 @@ func (n *Node) HandlePingReq(ctx context.Context, fromAddr string, targetAddr st
 		From:    n.Address,
 		Updates: n.updates,
 	}, nil
+}
+
+func (n *Node) getUpdatesCopy() map[string]NodeUpdate {
+	n.mu.RLock()
+	defer n.mu.Unlock()
+
+	updates := make(map[string]NodeUpdate, len(n.updates))
+
+	for key, up := range n.updates {
+		updates[key] = NodeUpdate{
+			Address:        up.Address,
+			Incarnation:    up.Incarnation,
+			PiggyBackCount: up.PiggyBackCount,
+			State:          up.State,
+			SuspectedAt:    up.SuspectedAt,
+		}
+	}
+
+	return updates
 }
