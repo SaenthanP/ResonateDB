@@ -255,7 +255,7 @@ func (n *Node) HandlePingReq(ctx context.Context, fromAddr string, targetAddr st
 
 func (n *Node) getUpdatesCopy() map[string]NodeUpdate {
 	n.mu.RLock()
-	defer n.mu.Unlock()
+	defer n.mu.RUnlock()
 
 	updates := make(map[string]NodeUpdate, len(n.updates))
 

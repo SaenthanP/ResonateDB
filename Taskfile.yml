@@ -5,14 +5,25 @@ vars:
   OUT_DIR: "proto-gen"
   PROTO_FILES: "{{.PROTO_DIR}}/cluster.proto"
 
+  BIN: "cluster-node"
+
+  NODE1: "localhost:5001"
+  NODE2: "localhost:5002"
+  NODE3: "localhost:5004"
+
 tasks:
+
+  # -------------------------
+  # Protobuf
+  # -------------------------
+
   generate:
     desc: "Generate protobuf code"
     cmds:
       - mkdir -p {{.OUT_DIR}}/cluster
-      - protoc 
-          --go_out={{.OUT_DIR}} 
-          --go-grpc_out={{.OUT_DIR}} 
+      - protoc
+          --go_out={{.OUT_DIR}}
+          --go-grpc_out={{.OUT_DIR}}
           {{.PROTO_FILES}}
 
   clean:
@@ -24,3 +35,63 @@ tasks:
     desc: "Run all tasks (generate)"
     deps:
       - generate
+
+
+  build:
+    desc: "Build cluster node binary"
+    cmds:
+      - go build -o bin/{{.BIN}} ./cmd/...
+
+
+  run:
+    desc: "Run a node"
+    vars:
+      ADDRESS: '{{.ADDRESS | default "localhost:5001"}}'
+      PEERS: '{{.PEERS | default ""}}'
+    cmds:
+      - >
+        go run ./cmd/main.go
+        -address {{.ADDRESS}}
+        {{if .PEERS}}-peers {{.PEERS}}{{end}}
+
+
+
+  node1:
+    desc: "Run node 1"
+    cmds:
+      - task: run
+        vars:
+          ADDRESS: "{{.NODE1}}"
+
+  node2:
+    desc: "Run node 2"
+    cmds:
+      - task: run
+        vars:
+          ADDRESS: "{{.NODE2}}"
+          PEERS: "{{.NODE1}}"
+
+  node3:
+    desc: "Run node 3"
+    cmds:
+      - task: run
+        vars:
+          ADDRESS: "{{.NODE3}}"
+          PEERS: "{{.NODE1}},{{.NODE2}}"
+
+  cluster:
+    desc: "Run 3-node cluster in tmux"
+    cmds:
+      - |
+          tmux new-session -d -s cluster "task node1; read" \; \
+          split-window -h "task node2; read" \; \
+          split-window -v "task node3; read" \; \
+          select-layout tiled \; \
+          attach
+
+
+
+  kill:
+    desc: "Kill running cluster tmux session"
+    cmds:
+      - tmux kill-session -t cluster || true
