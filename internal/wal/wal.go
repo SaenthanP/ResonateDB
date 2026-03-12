@@ -16,10 +16,15 @@ import (
 type Wal struct {
 	dir string
 
-	writer        *walWriter
-	activeSegment *activeSegment
-	segments      []*Segment
+	activeSegment  *activeSegment
+	segments       []*Segment
+	activeQueue    chan *walRequest
+	flushQueue     []*walRequest
+	flushTicker    *time.Ticker
+	maxSegmentSize int64
+	batchSize      int
 }
+
 type Segment struct {
 	id uint64
 
@@ -28,6 +33,7 @@ type Segment struct {
 	endIndex   uint64
 	size       int64
 }
+
 type activeSegment struct {
 	fd *os.File
 	*Segment
@@ -49,51 +55,17 @@ type WalConfig struct {
 	Dir string
 }
 
-type walWriter struct {
-	activeQueue    chan *walRequest
-	flushQueue     []*walRequest
-	flushTicker    *time.Ticker
-	maxSegmentSize int64
-	batchSize      int
-}
-
 func NewWal(cfg WalConfig) (*Wal, error) {
-	activeQueue := make(chan *walRequest, 4096)
-	flushQueue := []*walRequest{}
-
-	flushDuration := time.Second * 60
-	flushTicker := time.NewTicker(flushDuration)
-
-	// Check if segments directory exists, if not, make one
 	err := os.MkdirAll(cfg.Dir, 0755)
 	if err != nil {
 		return nil, err
 	}
-	// files, err := scanSegments(cfg.Dir)
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// if len(files) == 0 {
-	// 	// os.
-	// }
-	// segment := Segment{
-	// 	id:         0,
-	// 	path:       "",
-	// 	startIndex: 0,
-	// 	endIndex:   0,
-	// 	size:       0,
-	// }
-
-	walWriter := walWriter{
-		activeQueue: activeQueue,
-		flushQueue:  flushQueue,
-		flushTicker: flushTicker,
-	}
 
 	wal := &Wal{
-		dir:    cfg.Dir,
-		writer: new(walWriter),
+		dir:         cfg.Dir,
+		activeQueue: make(chan *walRequest, 4096),
+		flushQueue:  make([]*walRequest, 0, 256),
+		flushTicker: time.NewTicker(time.Second * 60),
 	}
 
 	err = wal.loadSegments()
@@ -109,6 +81,57 @@ func NewWal(cfg WalConfig) (*Wal, error) {
 	}
 
 	return wal, nil
+}
+
+func (w *Wal) appendEntry(entry *WalEntry) error {
+	req := &walRequest{
+		entry: entry,
+		done:  make(chan error),
+	}
+	w.activeQueue <- req
+	return <-req.done
+}
+
+func (w *Wal) flush() {
+	batch := w.flushQueue
+	if len(batch) == 0 {
+		return
+	}
+
+	errFunc := func(batch []*walRequest, err error) {
+		for _, r := range batch {
+			r.done <- err
+		}
+	}
+
+	buf := bytes.NewBuffer(nil)
+	for _, req := range batch {
+		data, err := encodeEntry(req.entry)
+		if err != nil {
+			errFunc(batch, err)
+			return
+		}
+		_, err = buf.Write(data)
+		if err != nil {
+			errFunc(batch, err)
+			return
+		}
+		if req.entry.Index > w.activeSegment.endIndex {
+			w.activeSegment.endIndex = req.entry.Index
+		}
+	}
+
+	bufLen, err := w.activeSegment.fd.Write(buf.Bytes())
+	if err == nil {
+		err = w.activeSegment.fd.Sync()
+	}
+	if err == nil {
+		w.activeSegment.size += int64(bufLen)
+	}
+	if err == nil && w.activeSegment.size >= w.maxSegmentSize {
+		err = w.rotateSegment()
+	}
+	errFunc(batch, err)
 }
 
 func scanSegmentFiles(dir string) ([]string, error) {
@@ -129,26 +152,49 @@ func scanSegmentFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
-func (w *Wal) newSegment(id uint64, startIndex int64) (*Segment, error) {
-	fileName := fmt.Sprintf("segment-%020d.log", id)
+func (w *Wal) rotateSegment() error {
+	var nextID uint64
+	var startIndex uint64
+
+	if len(w.segments) == 0 {
+		nextID = 0
+		startIndex = 0
+	} else {
+		last := w.segments[len(w.segments)-1]
+		nextID = last.id + 1
+		startIndex = last.endIndex + 1
+	}
+
+	fileName := fmt.Sprintf("segment-%020d.log", nextID)
 	path := filepath.Join(w.dir, fileName)
+
 	fd, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer fd.Close()
 
-	seg := Segment{
-		id:         id,
-		path:       fileName,
-		startIndex: uint64(startIndex),
+	seg := &Segment{
+		id:         nextID,
+		path:       path,
+		startIndex: startIndex,
+		endIndex:   startIndex,
 		size:       0,
 	}
-	return new(seg), nil
-}
-func (w *Wal) rotateSegment() error {
+
+	if w.activeSegment != nil {
+		if err = w.activeSegment.fd.Close(); err != nil {
+			return err
+		}
+	}
+	w.segments = append(w.segments, seg)
+
+	w.activeSegment = &activeSegment{
+		fd:      fd,
+		Segment: seg,
+	}
 	return nil
 }
+
 func parseSegmentID(path string) (uint64, error) {
 	name := filepath.Base(path)
 	name = strings.TrimPrefix(name, "segment-")
@@ -168,18 +214,16 @@ func (w *Wal) loadSegments() error {
 		if err != nil {
 			return err
 		}
-		defer fd.Close()
-		info, _ := fd.Stat()
-
+		info, err := fd.Stat()
+		if err != nil {
+			return err
+		}
+		
 		var startIndex, endIndex uint64
 		size := info.Size()
 		first := true
-		for {
-			_, err := fd.Seek(0, io.SeekCurrent)
-			if err != nil {
-				return err
-			}
 
+		for {
 			walEntry, err := decodeEntry(fd)
 			if err == io.EOF {
 				break
@@ -207,7 +251,9 @@ func (w *Wal) loadSegments() error {
 			endIndex:   endIndex,
 			size:       int64(size),
 		})
-
+		if err = fd.Close(); err != nil {
+			return err
+		}
 	}
 
 	w.segments = segments
@@ -222,7 +268,6 @@ func (w *Wal) loadSegments() error {
 			fd:      fd,
 			Segment: segment,
 		}
-
 	}
 
 	return nil
@@ -335,7 +380,3 @@ func decodeEntry(r io.Reader) (*WalEntry, error) {
 	}
 	return &entry, nil
 }
-
-// func (wal *Wal) Append(data []byte) (index uint64, err error) {
-
-// }
