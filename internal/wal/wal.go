@@ -35,7 +35,6 @@ type Clock interface {
 	NewTicker(d time.Duration) *time.Ticker
 }
 
-
 type Wal struct {
 	dir string
 
@@ -79,26 +78,31 @@ type walRequest struct {
 }
 
 type WalConfig struct {
-	Dir        string
-	Clock      Clock
-	FileSystem FileSystem
+	Dir            string
+	Clock          Clock
+	FileSystem     FileSystem
+	MaxSegmentSize int64
+	BatchSize      int
 }
 
 func NewWal(cfg WalConfig) (*Wal, error) {
-	err := os.MkdirAll(cfg.Dir, 0755)
+	fs := cfg.FileSystem
+	err := fs.MkdirAll(cfg.Dir, 0755)
 	if err != nil {
 		return nil, err
 	}
 	clock := cfg.Clock
 
 	wal := &Wal{
-		dir:         cfg.Dir,
-		activeQueue: make(chan *walRequest, 4096),
-		flushQueue:  make([]*walRequest, 0, 256),
-		flushTicker: clock.NewTicker(time.Second * 60),
-		done:        make(chan struct{}),
-		clock:       clock,
-		fileSystem:  cfg.FileSystem,
+		dir:            cfg.Dir,
+		activeQueue:    make(chan *walRequest, 4096),
+		flushQueue:     make([]*walRequest, 0, 256),
+		flushTicker:    clock.NewTicker(time.Second * 60),
+		done:           make(chan struct{}),
+		clock:          clock,
+		fileSystem:     cfg.FileSystem,
+		maxSegmentSize: cfg.MaxSegmentSize,
+		batchSize:      cfg.BatchSize,
 	}
 
 	err = wal.loadSegments()
@@ -140,7 +144,7 @@ func (w *Wal) Run() {
 func (w *Wal) Close() {
 	close(w.done)
 }
-func (w *Wal) appendEntry(entry *WalEntry) error {
+func (w *Wal) Append(entry *WalEntry) error {
 	req := &walRequest{
 		entry: entry,
 		done:  make(chan error),
@@ -191,9 +195,9 @@ func (w *Wal) flush() {
 	errFunc(batch, err)
 }
 
-func scanSegmentFiles(dir string) ([]string, error) {
+func (w *Wal) scanSegmentFiles() ([]string, error) {
 	var files []string
-	entries, err := os.ReadDir(dir)
+	entries, err := w.fileSystem.ReadDir(w.dir)
 	if err != nil {
 		return []string{}, err
 	}
@@ -203,7 +207,7 @@ func scanSegmentFiles(dir string) ([]string, error) {
 			continue
 		}
 		if strings.HasSuffix(entry.Name(), ".log") && strings.HasPrefix(entry.Name(), "segment-") {
-			files = append(files, filepath.Join(dir, entry.Name()))
+			files = append(files, filepath.Join(w.dir, entry.Name()))
 		}
 	}
 	return files, nil
@@ -260,7 +264,7 @@ func parseSegmentID(path string) (uint64, error) {
 }
 
 func (w *Wal) loadSegments() error {
-	filePaths, err := scanSegmentFiles(w.dir)
+	filePaths, err := w.scanSegmentFiles()
 	if err != nil {
 		return err
 	}
