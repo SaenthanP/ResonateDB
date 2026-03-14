@@ -2,16 +2,6 @@ package sim
 
 import "time"
 
-type RealClock struct{}
-
-func (c RealClock) Now() time.Time {
-	return time.Now()
-}
-
-func (c RealClock) NewTicker(d time.Duration) *time.Ticker {
-	return time.NewTicker(d)
-}
-
 type SimClock struct {
 	now time.Time
 }
@@ -24,7 +14,7 @@ func (c *SimClock) Now() time.Time {
 	return c.now
 }
 func (c *SimClock) Advance(d time.Duration) {
-	c.now.Add(d)
+	c.now = c.now.Add(d)
 }
 
 // this ticker is never read

@@ -4,30 +4,12 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/saenthan/resonatedb/internal/wal"
 )
-
-type RealFS struct{}
-
-func (fs *RealFS) OpenFile(path string, flag int, perm os.FileMode) (wal.File, error) {
-	return os.OpenFile(path, flag, perm)
-}
-
-func (fs *RealFS) ReadDir(dir string) ([]os.DirEntry, error) {
-	return os.ReadDir(dir)
-}
-
-func (fs *RealFS) MkdirAll(path string, perm os.FileMode) error {
-	return os.MkdirAll(path, perm)
-}
-
-func (fs *RealFS) Remove(path string) error {
-	return os.Remove(path)
-}
 
 type memFileInfo struct {
 	name string
@@ -120,7 +102,7 @@ func NewMemFS() *MemFS {
 	return &MemFS{files: make(map[string]*MemFile)}
 }
 
-func (fs *MemFS) OpenFile(path string, flag int, perm os.FileMode) (wal.File, error) {
+func (fs *MemFS) OpenFile(path string, flag int, perm os.FileMode) (*MemFile, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
@@ -149,7 +131,7 @@ func (fs *MemFS) ReadDir(dir string) ([]os.DirEntry, error) {
 	var entries []os.DirEntry
 	for path, f := range fs.files {
 		if strings.HasPrefix(path, prefix) {
-			entries = append(entries, memDirEntry{info: memFileInfo{name: f.name, size: int64(len(f.data))}})
+			entries = append(entries, memDirEntry{info: memFileInfo{name: filepath.Base(f.name), size: int64(len(f.data))}})
 		}
 	}
 	return entries, nil

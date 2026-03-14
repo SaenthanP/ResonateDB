@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/saenthan/resonatedb/internal/cluster"
+	"github.com/saenthan/resonatedb/internal/real"
 	"github.com/saenthan/resonatedb/internal/wal"
 	pb "github.com/saenthan/resonatedb/proto-gen/cluster"
-	"github.com/saenthan/resonatedb/sim"
 	"google.golang.org/grpc"
 )
 
@@ -25,9 +25,20 @@ func main() {
 
 	dir := filepath.Join(cwd, "wal_logs")
 
-	cfg := wal.WalConfig{Dir: dir}
-	wal, err := wal.NewWal(cfg)
-	fmt.Println(*wal)
+	cfg := wal.WalConfig{
+		Dir:            dir,
+		Clock:          real.RealClock{},
+		FileSystem:     &real.RealFS{},
+		MaxSegmentSize: 64 * 1024 * 1024,
+		BatchSize:      256,
+	}
+	w, err := wal.NewWal(cfg)
+	if err != nil {
+		fmt.Printf("failed to init wal: %v\n", err)
+		return
+	}
+	go w.Run()
+	defer w.Close()
 
 	//////////////////////////////////////////////////////
 	address := flag.String("address", "", "address of node")
@@ -60,7 +71,7 @@ func main() {
 		SeedAddresses:  parsedPeers,
 		Transport:      cluster.NewGRPCTransport(),
 		SuspectTimeout: time.Millisecond * 5000,
-		Clock:          sim.RealClock{},
+		Clock:          real.RealClock{},
 	}
 
 	node := cluster.NewNode(clusterCfg)
@@ -78,5 +89,4 @@ func main() {
 	if err := s.Serve(lis); err != nil {
 		fmt.Printf("failed to serve: %v", err)
 	}
-
 }

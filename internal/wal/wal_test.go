@@ -17,12 +17,28 @@ func (fs *realFS) OpenFile(path string, flag int, perm os.FileMode) (File, error
 }
 func (fs *realFS) ReadDir(dir string) ([]os.DirEntry, error)    { return os.ReadDir(dir) }
 func (fs *realFS) MkdirAll(path string, perm os.FileMode) error { return os.MkdirAll(path, perm) }
-func (fs *realFS) Remove(path string) error                      { return os.Remove(path) }
+func (fs *realFS) Remove(path string) error                     { return os.Remove(path) }
 
 type realClock struct{}
 
 func (realClock) Now() time.Time                         { return time.Now() }
 func (realClock) NewTicker(d time.Duration) *time.Ticker { return time.NewTicker(d) }
+
+func writeSegmentFile(t *testing.T, path string, entries []*WalEntry) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	for _, e := range entries {
+		b, err := encodeEntry(e)
+		require.NoError(t, err)
+
+		_, err = f.Write(b)
+		require.NoError(t, err)
+	}
+}
 
 func TestWalEncodeDecode(t *testing.T) {
 	originalEntry := WalEntry{
@@ -84,25 +100,9 @@ func TestWalSegmentIDParse(t *testing.T) {
 	}
 }
 
-func writeSegmentFile(t *testing.T, path string, entries []*WalEntry) {
-	t.Helper()
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	for _, e := range entries {
-		b, err := encodeEntry(e)
-		require.NoError(t, err)
-
-		_, err = f.Write(b)
-		require.NoError(t, err)
-	}
-}
-
 func TestLoadSegments_Empty(t *testing.T) {
 	dir := t.TempDir()
-	w := &Wal{dir: dir}
+	w := &Wal{dir: dir, fileSystem: &realFS{}}
 	if err := w.loadSegments(); err != nil {
 		t.Fatalf("loadSegments: %v", err)
 	}
@@ -170,11 +170,3 @@ func TestLoadSegments_MultipleSegments_LastIsActive(t *testing.T) {
 
 	require.Equal(t, w.activeSegment.id, uint64(2))
 }
-
-/*
-CRC
-segment id parse
-write segment file hlper
-load segment empty
-load single segment
-*/
