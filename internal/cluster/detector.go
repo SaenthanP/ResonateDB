@@ -12,8 +12,8 @@ const (
 )
 
 func (n *Node) StartFailureDetector(ctx context.Context) {
-	ticker := time.NewTicker(PingInterval)
-	suspectNodeCleanupTicker := time.NewTicker(500 * time.Millisecond)
+	ticker := n.clock.NewTicker(PingInterval)
+	suspectNodeCleanupTicker := n.clock.NewTicker(500 * time.Millisecond)
 
 	go func() {
 		defer ticker.Stop()
@@ -42,7 +42,7 @@ func (n *Node) runSuspectNodeCleanup(ctx context.Context) {
 		}
 
 		if update.State == Suspect {
-			if time.Since(update.SuspectedAt) > n.SuspectTimeout {
+			if n.clock.Now().Sub(update.SuspectedAt) > n.SuspectTimeout {
 				fmt.Printf("Node %s failed to refute suspicion in time, marking as Fail\n", addr)
 				update.State = Fail
 				n.updates[addr] = update

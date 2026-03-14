@@ -23,6 +23,7 @@ type Wal struct {
 	flushTicker    *time.Ticker
 	maxSegmentSize int64
 	batchSize      int
+	done           chan struct{}
 }
 
 type Segment struct {
@@ -66,6 +67,7 @@ func NewWal(cfg WalConfig) (*Wal, error) {
 		activeQueue: make(chan *walRequest, 4096),
 		flushQueue:  make([]*walRequest, 0, 256),
 		flushTicker: time.NewTicker(time.Second * 60),
+		done:        make(chan struct{}),
 	}
 
 	err = wal.loadSegments()
@@ -83,6 +85,30 @@ func NewWal(cfg WalConfig) (*Wal, error) {
 	return wal, nil
 }
 
+func (w *Wal) Run() {
+	for {
+		select {
+		case req := <-w.activeQueue:
+			w.flushQueue = append(w.flushQueue, req)
+			if len(w.flushQueue) >= w.batchSize {
+				w.flush()
+				w.flushQueue = w.flushQueue[:0]
+			}
+		case <-w.flushTicker.C:
+			w.flush()
+			w.flushQueue = w.flushQueue[:0]
+		case <-w.done:
+			w.flush()
+			w.flushTicker.Stop()
+			w.activeSegment.fd.Close()
+			return
+		}
+	}
+}
+
+func (w *Wal) Close() {
+	close(w.done)
+}
 func (w *Wal) appendEntry(entry *WalEntry) error {
 	req := &walRequest{
 		entry: entry,
@@ -218,7 +244,7 @@ func (w *Wal) loadSegments() error {
 		if err != nil {
 			return err
 		}
-		
+
 		var startIndex, endIndex uint64
 		size := info.Size()
 		first := true

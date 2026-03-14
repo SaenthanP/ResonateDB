@@ -21,6 +21,11 @@ const (
 	K = 3
 )
 
+type Clock interface {
+	Now() time.Time
+	NewTicker(d time.Duration) *time.Ticker
+}
+
 // This should be moved to the grpc handler/transport area
 func (s ServerState) ToProto() pb.NodeState {
 	switch s {
@@ -50,6 +55,7 @@ type Node struct {
 	Incarnation    int
 	Transport      Transport
 	SuspectTimeout time.Duration
+	clock          Clock
 }
 
 type Config struct {
@@ -57,6 +63,7 @@ type Config struct {
 	SeedAddresses  []string
 	Transport      Transport
 	SuspectTimeout time.Duration
+	clock          Clock
 }
 
 func NewNode(cfg Config) *Node {
@@ -66,6 +73,7 @@ func NewNode(cfg Config) *Node {
 		Incarnation:    0,
 		Transport:      cfg.Transport,
 		SuspectTimeout: cfg.SuspectTimeout,
+		clock:          cfg.clock,
 	}
 
 	node.updates[cfg.Address] = NodeUpdate{
@@ -190,7 +198,7 @@ func (n *Node) markSuspect(target string) {
 		return
 	}
 	curr.State = Suspect
-	curr.SuspectedAt = time.Now()
+	curr.SuspectedAt = n.clock.Now()
 	n.updates[target] = curr
 }
 
