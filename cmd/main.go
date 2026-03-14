@@ -13,6 +13,7 @@ import (
 	"github.com/saenthan/resonatedb/internal/cluster"
 	"github.com/saenthan/resonatedb/internal/wal"
 	pb "github.com/saenthan/resonatedb/proto-gen/cluster"
+	"github.com/saenthan/resonatedb/sim"
 	"google.golang.org/grpc"
 )
 
@@ -59,6 +60,7 @@ func main() {
 		SeedAddresses:  parsedPeers,
 		Transport:      cluster.NewGRPCTransport(),
 		SuspectTimeout: time.Millisecond * 5000,
+		Clock:          sim.RealClock{},
 	}
 
 	node := cluster.NewNode(clusterCfg)

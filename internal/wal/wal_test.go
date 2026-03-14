@@ -5,9 +5,24 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type realFS struct{}
+
+func (fs *realFS) OpenFile(path string, flag int, perm os.FileMode) (File, error) {
+	return os.OpenFile(path, flag, perm)
+}
+func (fs *realFS) ReadDir(dir string) ([]os.DirEntry, error)    { return os.ReadDir(dir) }
+func (fs *realFS) MkdirAll(path string, perm os.FileMode) error { return os.MkdirAll(path, perm) }
+func (fs *realFS) Remove(path string) error                      { return os.Remove(path) }
+
+type realClock struct{}
+
+func (realClock) Now() time.Time                         { return time.Now() }
+func (realClock) NewTicker(d time.Duration) *time.Ticker { return time.NewTicker(d) }
 
 func TestWalEncodeDecode(t *testing.T) {
 	originalEntry := WalEntry{
@@ -118,7 +133,7 @@ func TestLoadSegments_SingleSegment(t *testing.T) {
 
 	writeSegmentFile(t, path, entries)
 
-	wal := &Wal{dir: dir}
+	wal := &Wal{dir: dir, clock: realClock{}, fileSystem: &realFS{}}
 
 	err := wal.loadSegments()
 	require.NoError(t, err)
@@ -147,7 +162,7 @@ func TestLoadSegments_MultipleSegments_LastIsActive(t *testing.T) {
 		{Index: 2, Type: 1, Value: []byte("y")},
 	})
 
-	w := &Wal{dir: dir}
+	w := &Wal{dir: dir, clock: realClock{}, fileSystem: &realFS{}}
 	err := w.loadSegments()
 	require.Nil(t, err)
 

@@ -63,7 +63,7 @@ type Config struct {
 	SeedAddresses  []string
 	Transport      Transport
 	SuspectTimeout time.Duration
-	clock          Clock
+	Clock          Clock
 }
 
 func NewNode(cfg Config) *Node {
@@ -73,7 +73,7 @@ func NewNode(cfg Config) *Node {
 		Incarnation:    0,
 		Transport:      cfg.Transport,
 		SuspectTimeout: cfg.SuspectTimeout,
-		clock:          cfg.clock,
+		clock:          cfg.Clock,
 	}
 
 	node.updates[cfg.Address] = NodeUpdate{

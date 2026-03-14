@@ -13,6 +13,29 @@ import (
 	"time"
 )
 
+type File interface {
+	io.Reader
+	Write(b []byte) (int, error)
+	Sync() error
+	Close() error
+	Seek(offset int64, whence int) (int64, error)
+	Name() string
+	Stat() (os.FileInfo, error)
+}
+
+type FileSystem interface {
+	OpenFile(path string, flag int, perm os.FileMode) (File, error)
+	ReadDir(dir string) ([]os.DirEntry, error)
+	MkdirAll(path string, perm os.FileMode) error
+	Remove(path string) error
+}
+
+type Clock interface {
+	Now() time.Time
+	NewTicker(d time.Duration) *time.Ticker
+}
+
+
 type Wal struct {
 	dir string
 
@@ -24,6 +47,9 @@ type Wal struct {
 	maxSegmentSize int64
 	batchSize      int
 	done           chan struct{}
+
+	clock      Clock
+	fileSystem FileSystem
 }
 
 type Segment struct {
@@ -36,7 +62,7 @@ type Segment struct {
 }
 
 type activeSegment struct {
-	fd *os.File
+	fd File
 	*Segment
 }
 
@@ -53,7 +79,9 @@ type walRequest struct {
 }
 
 type WalConfig struct {
-	Dir string
+	Dir        string
+	Clock      Clock
+	FileSystem FileSystem
 }
 
 func NewWal(cfg WalConfig) (*Wal, error) {
@@ -61,13 +89,16 @@ func NewWal(cfg WalConfig) (*Wal, error) {
 	if err != nil {
 		return nil, err
 	}
+	clock := cfg.Clock
 
 	wal := &Wal{
 		dir:         cfg.Dir,
 		activeQueue: make(chan *walRequest, 4096),
 		flushQueue:  make([]*walRequest, 0, 256),
-		flushTicker: time.NewTicker(time.Second * 60),
+		flushTicker: clock.NewTicker(time.Second * 60),
 		done:        make(chan struct{}),
+		clock:       clock,
+		fileSystem:  cfg.FileSystem,
 	}
 
 	err = wal.loadSegments()
@@ -194,7 +225,7 @@ func (w *Wal) rotateSegment() error {
 	fileName := fmt.Sprintf("segment-%020d.log", nextID)
 	path := filepath.Join(w.dir, fileName)
 
-	fd, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+	fd, err := w.fileSystem.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
 	if err != nil {
 		return err
 	}
@@ -236,7 +267,7 @@ func (w *Wal) loadSegments() error {
 
 	var segments []*Segment
 	for _, path := range filePaths {
-		fd, err := os.OpenFile(path, os.O_RDWR, 0644)
+		fd, err := w.fileSystem.OpenFile(path, os.O_RDWR, 0644)
 		if err != nil {
 			return err
 		}
@@ -286,7 +317,7 @@ func (w *Wal) loadSegments() error {
 	if len(segments) > 0 {
 		segment := segments[len(segments)-1]
 
-		fd, err := os.OpenFile(segment.path, os.O_APPEND|os.O_RDWR, 0644)
+		fd, err := w.fileSystem.OpenFile(segment.path, os.O_APPEND|os.O_RDWR, 0644)
 		if err != nil {
 			return err
 		}
