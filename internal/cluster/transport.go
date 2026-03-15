@@ -4,6 +4,7 @@ import "context"
 
 type PingRequest struct {
 	From    string
+	Target  string // used by PingReq: the node the intermediary should forward the ping to
 	Updates map[string]NodeUpdate
 }
 

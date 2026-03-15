@@ -85,6 +85,7 @@ func (g *GRPCTransport) PingReq(
 	client := pb.NewClusterServiceClient(conn)
 	ack, err := client.PingReqNode(ctx, &pb.PingReq{
 		From:    req.From,
+		Target:  req.Target,
 		Updates: toProtoUpdates(req.Updates),
 	})
 
