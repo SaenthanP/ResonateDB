@@ -228,7 +228,7 @@ func (n *Node) HandlePing(ctx context.Context, fromAddr string, updates map[stri
 
 	return PingResponse{
 		From:    fromAddr,
-		Updates: n.getUpdatesCopy(),
+		Updates: n.GetUpdates(),
 	}, nil
 }
 
@@ -241,7 +241,7 @@ func (n *Node) HandlePingReq(ctx context.Context, fromAddr string, targetAddr st
 	// TODO: When switching to proper concurrency, n.updates should actually send a copy because maps are reference types
 	input := PingRequest{
 		From:    n.Address,
-		Updates: n.getUpdatesCopy(),
+		Updates: n.GetUpdates(),
 	}
 
 	// ack, err := n.Peers[targetAddr].Client.Ping(ctx, input)
@@ -261,7 +261,7 @@ func (n *Node) HandlePingReq(ctx context.Context, fromAddr string, targetAddr st
 	}, nil
 }
 
-func (n *Node) getUpdatesCopy() map[string]NodeUpdate {
+func (n *Node) GetUpdates() map[string]NodeUpdate {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 

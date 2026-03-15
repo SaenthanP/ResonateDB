@@ -22,9 +22,9 @@ func (n *Node) StartFailureDetector(ctx context.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				n.runPingRound(ctx)
+				n.RunPingRound(ctx)
 			case <-suspectNodeCleanupTicker.C:
-				n.runSuspectNodeCleanup(ctx)
+				n.RunSuspectCleanup(ctx)
 			case <-ctx.Done():
 				return
 			}
@@ -32,7 +32,7 @@ func (n *Node) StartFailureDetector(ctx context.Context) {
 	}()
 }
 
-func (n *Node) runSuspectNodeCleanup(ctx context.Context) {
+func (n *Node) RunSuspectCleanup(ctx context.Context) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -50,7 +50,7 @@ func (n *Node) runSuspectNodeCleanup(ctx context.Context) {
 		}
 	}
 }
-func (n *Node) runPingRound(ctx context.Context) {
+func (n *Node) RunPingRound(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, PingTimeout)
 	defer cancel()
 

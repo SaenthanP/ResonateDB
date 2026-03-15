@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"context"
 	"math/rand"
 	"time"
 
@@ -16,7 +17,7 @@ type Simulator struct {
 	Nodes     []*SimNode
 	Transport *SimTransport
 	Clock     *SimClock
-	rng       *rand.Rand
+	Rng       *rand.Rand
 }
 
 func NewSimulator(seed int64, addresses []string) *Simulator {
@@ -27,7 +28,7 @@ func NewSimulator(seed int64, addresses []string) *Simulator {
 	sim := &Simulator{
 		Transport: transport,
 		Clock:     clk,
-		rng:       rng,
+		Rng:       rng,
 	}
 
 	for _, addr := range addresses {
@@ -45,4 +46,32 @@ func NewSimulator(seed int64, addresses []string) *Simulator {
 		})
 	}
 	return sim
+}
+
+func (s *Simulator) Step(d time.Duration) {
+	s.Clock.Advance(d)
+	ctx := context.Background()
+	node := s.Nodes[s.Rng.Intn(len(s.Nodes))]
+	node.Node.RunPingRound(ctx)
+	for _, n := range s.Nodes {
+		n.Node.RunSuspectCleanup(ctx)
+	}
+}
+
+func (s *Simulator) Run(steps int, d time.Duration) {
+	for range steps {
+		s.Step(d)
+	}
+}
+
+func (s *Simulator) Partition(a, b string) { s.Transport.Partition(a, b) }
+func (s *Simulator) Heal(a, b string)      { s.Transport.Heal(a, b) }
+
+func (s *Simulator) NodeState(observer, target string) cluster.ServerState {
+	for _, n := range s.Nodes {
+		if n.Address == observer {
+			return n.Node.GetUpdates()[target].State
+		}
+	}
+	panic("unknown observer: " + observer)
 }
