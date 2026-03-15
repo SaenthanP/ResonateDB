@@ -1,6 +1,7 @@
 package wal_test
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"testing"
@@ -73,6 +74,116 @@ func TestWAL_MultipleAppendsAccumulate(t *testing.T) {
 	for _, e := range written {
 		require.NoError(t, w.Append(e))
 	}
+
+	entries := readAllEntries(t, w, fs)
+	require.Len(t, entries, len(written))
+	for i, e := range entries {
+		require.Equal(t, written[i].Index, e.Index)
+		require.Equal(t, written[i].Value, e.Value)
+	}
+}
+
+func TestWal_AppendAfterReload(t *testing.T) {
+	fs := sim.NewMemFS()
+	clk := sim.NewSimClock(0)
+
+	w := newTestWal(t, fs, clk, 4096)
+	go w.Run()
+
+	written := []*wal.WalEntry{
+		{Index: 0, Type: 1, Value: []byte("a1")},
+		{Index: 1, Type: 1, Value: []byte("a2")},
+		{Index: 2, Type: 1, Value: []byte("a3")},
+	}
+
+	for _, e := range written {
+		require.NoError(t, w.Append(e))
+	}
+	w.Close()
+
+	w2 := newTestWal(t, fs, clk, 4096)
+	written2 := []*wal.WalEntry{
+		{Index: 3, Type: 1, Value: []byte("b1")},
+		{Index: 4, Type: 1, Value: []byte("b2")},
+		{Index: 5, Type: 1, Value: []byte("b3")},
+	}
+
+	go w2.Run()
+	defer w2.Close()
+	for _, e := range written2 {
+		require.NoError(t, w2.Append(e))
+	}
+
+	totalWritten := append(written, written2...)
+	entries := readAllEntries(t, w2, fs)
+	require.Len(t, entries, len(totalWritten))
+	for i, e := range entries {
+		require.Equal(t, totalWritten[i].Index, e.Index)
+		require.Equal(t, totalWritten[i].Value, e.Value)
+	}
+}
+
+func TestWal_WriteFailure(t *testing.T) {
+	fs := sim.NewMemFS()
+	clk := sim.NewSimClock(0)
+
+	w := newTestWal(t, fs, clk, 4096)
+	go w.Run()
+	defer w.Close()
+
+	require.NoError(t, w.Append(&wal.WalEntry{Index: 0, Value: []byte("ok")}))
+
+	files, err := wal.ScanSegmentFiles(w)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+
+	f, err := fs.OpenFile(files[0], os.O_RDONLY, 0)
+	require.NoError(t, err)
+	f.FailAfterByteCount = 1 
+
+	require.Error(t, w.Append(&wal.WalEntry{Index: 1, Value: []byte("fail")}))
+}
+
+func TestWal_SyncFailure(t *testing.T) {
+	fs := sim.NewMemFS()
+	clk := sim.NewSimClock(0)
+
+	w := newTestWal(t, fs, clk, 4096)
+	go w.Run()
+	defer w.Close()
+
+	require.NoError(t, w.Append(&wal.WalEntry{Index: 0, Value: []byte("ok")}))
+
+	files, err := wal.ScanSegmentFiles(w)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	f, err := fs.OpenFile(files[0], os.O_RDONLY, 0)
+	require.NoError(t, err)
+	f.FailNextFSync = true
+
+	require.Error(t, w.Append(&wal.WalEntry{Index: 1, Value: []byte("fail")}))
+}
+
+func TestWal_SegmentRotation(t *testing.T) {
+	fs := sim.NewMemFS()
+	clk := sim.NewSimClock(0)
+
+	w := newTestWal(t, fs, clk, 50)
+	go w.Run()
+	defer w.Close()
+
+	var written []*wal.WalEntry
+	for i := range uint64(10) {
+		entry := &wal.WalEntry{Index: i, Value: fmt.Append(nil, i)}
+		written = append(written, entry)
+		require.NoError(t, w.Append(entry))
+	}
+
+	files, err := wal.ScanSegmentFiles(w)
+	require.NoError(t, err)
+	require.Greater(t, len(files), 1)
 
 	entries := readAllEntries(t, w, fs)
 	require.Len(t, entries, len(written))
