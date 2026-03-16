@@ -3,7 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"sort"
 	"sync"
 	"time"
 
@@ -24,6 +24,11 @@ const (
 type Clock interface {
 	Now() time.Time
 	NewTicker(d time.Duration) *time.Ticker
+}
+
+type Rand interface {
+	Intn(n int) int
+	Shuffle(n int, swap func(i, j int))
 }
 
 // This should be moved to the grpc handler/transport area
@@ -56,6 +61,7 @@ type Node struct {
 	Transport      Transport
 	SuspectTimeout time.Duration
 	clock          Clock
+	rng            Rand
 }
 
 type Config struct {
@@ -64,6 +70,7 @@ type Config struct {
 	Transport      Transport
 	SuspectTimeout time.Duration
 	Clock          Clock
+	Rng            Rand
 }
 
 func NewNode(cfg Config) *Node {
@@ -74,6 +81,7 @@ func NewNode(cfg Config) *Node {
 		Transport:      cfg.Transport,
 		SuspectTimeout: cfg.SuspectTimeout,
 		clock:          cfg.Clock,
+		rng:            cfg.Rng,
 	}
 
 	node.updates[cfg.Address] = NodeUpdate{
@@ -101,7 +109,7 @@ func (n *Node) mergeUpdates(peerUpdates map[string]NodeUpdate) {
 
 	for addr, u := range peerUpdates {
 		if addr == n.Address {
-			if (u.State == Suspect || u.State == Fail) && u.Incarnation >= n.Incarnation {
+			if u.State == Suspect && u.Incarnation >= n.Incarnation {
 				n.Incarnation++
 				n.updates[n.Address] = NodeUpdate{
 					Address:        n.Address,
@@ -126,6 +134,20 @@ func (n *Node) mergeUpdates(peerUpdates map[string]NodeUpdate) {
 			continue
 		}
 
+		if incomingState == Fail && current.State != Fail {
+			n.updates[addr] = NodeUpdate{
+				Address:        u.Address,
+				Incarnation:    int(u.Incarnation),
+				State:          Fail,
+				PiggyBackCount: 0,
+			}
+			continue
+		}
+
+		if current.State == Fail {
+			continue
+		}
+
 		if u.Incarnation > current.Incarnation {
 			n.updates[addr] = NodeUpdate{
 				Address:        u.Address,
@@ -133,7 +155,7 @@ func (n *Node) mergeUpdates(peerUpdates map[string]NodeUpdate) {
 				State:          incomingState,
 				PiggyBackCount: 0,
 			}
-		} else if u.Incarnation == current.Incarnation && isStronger(incomingState, current.State) && current.State != Fail {
+		} else if u.Incarnation == current.Incarnation && isStronger(incomingState, current.State) {
 			current.State = incomingState
 			current.PiggyBackCount = 0
 			n.updates[addr] = current
@@ -164,7 +186,8 @@ func (n *Node) getNodeToPing() string {
 		return ""
 	}
 
-	randomAddr := keys[rand.Intn(len(keys))]
+	sort.Strings(keys)
+	randomAddr := keys[n.rng.Intn(len(keys))]
 	return randomAddr
 }
 
@@ -180,7 +203,7 @@ func (n *Node) getKNodesToPing() []string {
 		}
 		candidates = append(candidates, addr)
 	}
-	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
+	n.rng.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
 	if len(candidates) < K {
 		return candidates
@@ -217,6 +240,9 @@ func (n *Node) markAlive(peerAddress string) {
 		return
 	}
 
+	if node.State == Fail {
+		return
+	}
 	node.State = Alive
 	n.updates[peerAddress] = node
 }
