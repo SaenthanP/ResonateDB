@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"slices"
+	"sort"
+	"sync"
 )
 
 type Ring struct {
@@ -12,6 +14,7 @@ type Ring struct {
 	vnodeToAddr map[uint32]string
 	vnodeCount  uint32
 	addresses   map[string]struct{}
+	mu          sync.RWMutex
 }
 
 func NewRing(vnodeCount uint32) *Ring {
@@ -28,6 +31,9 @@ func NewRing(vnodeCount uint32) *Ring {
 }
 
 func (r *Ring) AddNode(addr string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	if _, exists := r.addresses[addr]; exists {
 		return
 	}
@@ -42,7 +48,47 @@ func (r *Ring) AddNode(addr string) {
 	slices.Sort(r.vnodes)
 }
 
+func (r *Ring) RemoveNode(addr string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
+	if _, exists := r.addresses[addr]; !exists {
+		return
+	}
+
+	var filteredVNodes []uint32
+
+	for _, v := range r.vnodes {
+		if r.vnodeToAddr[v] != addr {
+			filteredVNodes = append(filteredVNodes, v)
+		} else {
+			delete(r.vnodeToAddr, v)
+		}
+	}
+	delete(r.addresses, addr)
+	r.vnodes = filteredVNodes
+}
+func (r *Ring) GetNodes(key string, n uint32) []string {
+	hash := hash(key)
+	seen := make(map[string]struct{})
+	records := make([]string, 0, n)
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	// find the first position the value belongs to to prevent scanning the whole ring
+	idx := sort.Search(len(r.vnodes), func(i int) bool { return r.vnodes[i] >= hash })
+
+	for i := 0; len(records) < int(n) && i < int(r.vnodeCount); i++ {
+		index := (idx + i) % int(r.vnodeCount)
+		addr := r.vnodeToAddr[r.vnodes[index]]
+		if _, exists := seen[addr]; !exists {
+			seen[addr] = struct{}{}
+			records = append(records, addr)
+		}
+	}
+	return records
+}
 
 func hash(addr string) uint32 {
 	data := sha256.Sum256([]byte(addr))
